@@ -17,10 +17,9 @@ import copy
 from collections import OrderedDict
 
 import pynetbox.core.app
-from six.moves.urllib.parse import urlsplit
 from pynetbox.core.query import Request, RequestError
 from pynetbox.core.util import Hashabledict
-
+from six.moves.urllib.parse import urlsplit
 
 # List of fields that are lists but should be treated as sets.
 LIST_AS_SET = ("tags", "tagged_vlans")
@@ -59,7 +58,10 @@ def get_return(lookup, return_fields=None):
 
 def flatten_custom(custom_dict):
     return {
-        k: v if not isinstance(v, dict) else v["value"] for k, v in custom_dict.items()
+        k: v
+        if (not isinstance(v, dict) or (not v.get("id") and not v.get("url")))
+        else v["id"]
+        for k, v in custom_dict.items()
     }
 
 
