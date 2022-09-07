@@ -18,6 +18,7 @@ try:
 except ImportError:
     pass
 import json
+
 from six.moves.urllib.parse import urlencode
 
 
@@ -449,7 +450,6 @@ class Request(object):
 
         :returns: Int of number of objects query returned.
         """
-
         if not hasattr(self, "count"):
-            self.count = self._make_call(add_params={"limit": 1})["count"]
+            self.count = self._make_call(add_params={"limit": 1, "brief": 1})["count"]
         return self.count
