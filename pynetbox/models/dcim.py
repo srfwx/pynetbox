@@ -91,7 +91,7 @@ class PathableRecord(Record):
                     urlsplit(hop_item_data[0]["url"]).path[len(urlsplit(self.api.base_url).path):].split("/")[1:3]
                 )
                 return_obj_class = uri_to_obj_class_map.get(app_endpoint, Record, )
-                this_path_ret.append(return_obj_class(hop_item_data, self.endpoint.api, self.endpoint))
+                this_path_ret.append(return_obj_class(hop_item_data[0], self.endpoint.api, self.endpoint))
 
             ret.append({'path': this_path_ret})
 
