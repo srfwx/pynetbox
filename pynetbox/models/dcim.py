@@ -13,13 +13,12 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-from six.moves.urllib.parse import urlsplit
-
-from pynetbox.core.query import Request
-from pynetbox.core.response import Record, JsonField
 from pynetbox.core.endpoint import RODetailEndpoint
-from pynetbox.models.ipam import IpAddresses
+from pynetbox.core.query import Request
+from pynetbox.core.response import JsonField, Record
 from pynetbox.models.circuits import Circuits
+from pynetbox.models.ipam import IpAddresses
+from six.moves.urllib.parse import urlsplit
 
 
 class TraceableRecord(Record):
@@ -85,8 +84,6 @@ class PathableRecord(Record):
 
         for related_path in req:
             path = related_path['path']
-            origin = related_path['origin']
-            destination = related_path['destination']
             this_path_ret = []
             for hop_item_data in path:
                 app_endpoint = "/".join(
@@ -97,21 +94,7 @@ class PathableRecord(Record):
                 return_obj_class = uri_to_obj_class_map.get(app_endpoint, Record, )
                 this_path_ret.append(return_obj_class(hop_item_data, self.endpoint.api, self.endpoint))
 
-            origin_endpoint = "/".join(
-                    urlsplit(origin["url"])
-                        .path[len(urlsplit(self.api.base_url).path):]
-                        .split("/")[1:3]
-                ) if origin else None
-            origin = uri_to_obj_class_map.get(origin_endpoint, Record, )(origin, self.endpoint.api, self.endpoint)
-
-            destination_endpoint = "/".join(
-                urlsplit(destination["url"])
-                    .path[len(urlsplit(self.api.base_url).path):]
-                    .split("/")[1:3]
-            ) if destination else None
-            destination = uri_to_obj_class_map.get(destination_endpoint, Record, )(destination, self.endpoint.api, self.endpoint)
-
-            ret.append({'origin': origin, 'destination': destination, 'path': this_path_ret})
+            ret.append({'path': this_path_ret})
 
         return ret
 
