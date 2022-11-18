@@ -65,6 +65,7 @@ class TraceableRecord(Record):
 
         return ret
 
+
 class PathableRecord(Record):
     def paths(self):
         req = Request(
@@ -87,9 +88,7 @@ class PathableRecord(Record):
             this_path_ret = []
             for hop_item_data in path:
                 app_endpoint = "/".join(
-                    urlsplit(hop_item_data["url"])
-                        .path[len(urlsplit(self.api.base_url).path):]
-                        .split("/")[1:3]
+                    urlsplit(hop_item_data["url"]).path[len(urlsplit(self.api.base_url).path):].split("/")[1:3]
                 )
                 return_obj_class = uri_to_obj_class_map.get(app_endpoint, Record, )
                 this_path_ret.append(return_obj_class(hop_item_data, self.endpoint.api, self.endpoint))
@@ -97,8 +96,6 @@ class PathableRecord(Record):
             ret.append({'path': this_path_ret})
 
         return ret
-
-
 
 
 class DeviceTypes(Record):
