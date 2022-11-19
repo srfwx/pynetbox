@@ -57,12 +57,25 @@ def get_return(lookup, return_fields=None):
 
 
 def flatten_custom(custom_dict):
-    return {
-        k: v
-        if (not isinstance(v, dict) or (not v.get("id") and not v.get("url")))
-        else v["id"]
-        for k, v in custom_dict.items()
-    }
+    """
+    Flatten the Custom Fields dictionary of an object
+    """
+    flattened_dict = {}
+    for k, v in custom_dict.items():
+        if isinstance(v, dict) and v.get("id", None) and v.get("url", None):
+            # NetBox Object
+            flattened_dict[k] = v["id"]
+        elif isinstance(v, list):
+            # Multiple NetBox Objects?
+            flattened_dict[k] = []
+            for i in v:
+                if isinstance(i, dict) and i.get("id", None) and i.get("url", None):
+                    flattened_dict[k].append(i.get("id"))
+                else:
+                    flattened_dict[k].append(i)
+        else:
+            flattened_dict[k] = v
+    return flattened_dict
 
 
 class JsonField(object):
