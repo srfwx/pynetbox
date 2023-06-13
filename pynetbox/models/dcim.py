@@ -92,7 +92,7 @@ class PathableRecord(Record):
             app_endpoint,
             Record,
         )
-    
+
     def _build_termination_data(self, termination_list):
         terminations_data = []
         for hop_item_data in termination_list:
@@ -116,9 +116,8 @@ class PathableRecord(Record):
             path = related_path['path']
             this_path_ret = []
             for hop_item_data in path:
-                return_obj_class = self._get_obj_class(hop_item_data["url"][0])
                 termination_data = self._build_termination_data(hop_item_data)
-                if isinstance(return_obj_class, Cables):
+                if isinstance(termination_data[0], Cables):
                     # We mimick the output of the trace method where cables
                     # are only a single hop
                     termination_data = termination_data[0]
