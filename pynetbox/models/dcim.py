@@ -92,6 +92,16 @@ class PathableRecord(Record):
             app_endpoint,
             Record,
         )
+    
+    def _build_termination_data(self, termination_list):
+        terminations_data = []
+        for hop_item_data in termination_list:
+            return_obj_class = self._get_obj_class(hop_item_data["url"])
+            terminations_data.append(
+                return_obj_class(hop_item_data, self.endpoint.api, self.endpoint)
+            )
+
+        return terminations_data
 
     def paths(self):
         req = Request(
@@ -106,19 +116,15 @@ class PathableRecord(Record):
             path = related_path['path']
             this_path_ret = []
             for hop_item_data in path:
-                # Warning! This doesn't support NetBox split cabling
-                # We assume there is always only one item!
-                hop_item_data = hop_item_data[0]
-                return_obj_class = self._get_obj_class(hop_item_data["url"])
-                this_path_ret.append(return_obj_class(hop_item_data, self.endpoint.api, self.endpoint))
+                return_obj_class = self._get_obj_class(hop_item_data["url"][0])
+                termination_data = self._build_termination_data(hop_item_data)
+                if isinstance(return_obj_class, Cables):
+                    # We mimick the output of the trace method where cables
+                    # are only a single hop
+                    termination_data = termination_data[0]
+                this_path_ret.append(termination_data)
 
-            ret.append(
-                {
-                    'origin': this_path_ret[0],
-                    'destination': this_path_ret[-1],
-                    'path': this_path_ret
-                }
-            )
+            ret.append(this_path_ret)
 
         return ret
 
