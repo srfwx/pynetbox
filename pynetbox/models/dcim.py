@@ -15,11 +15,11 @@ limitations under the License.
 """
 from urllib.parse import urlsplit
 
-from pynetbox.core.query import Request
-from pynetbox.core.response import Record, JsonField
 from pynetbox.core.endpoint import RODetailEndpoint
-from pynetbox.models.ipam import IpAddresses
+from pynetbox.core.query import Request
+from pynetbox.core.response import JsonField, Record
 from pynetbox.models.circuits import Circuits
+from pynetbox.models.ipam import IpAddresses
 
 
 class TraceableRecord(Record):
@@ -73,6 +73,55 @@ class TraceableRecord(Record):
             ret.append(self._build_termination_data(b_terminations_data))
 
         return ret
+
+
+class PathableRecord(Record):
+
+    def _get_obj_class(self, url):
+        uri_to_obj_class_map = {
+            "dcim/cables": Cables,
+            "dcim/front-ports": FrontPorts,
+            "dcim/interfaces": Interfaces,
+            "dcim/rear-ports": RearPorts,
+        }
+
+        app_endpoint = "/".join(
+            urlsplit(url).path[len(urlsplit(self.api.base_url).path) :].split("/")[1:3]
+        )
+        return uri_to_obj_class_map.get(
+            app_endpoint,
+            Record,
+        )
+
+    def paths(self):
+        req = Request(
+            key=str(self.id) + "/paths",
+            base=self.endpoint.url,
+            token=self.api.token,
+            http_session=self.api.http_session,
+        ).get()
+        ret = []
+
+        for related_path in req:
+            path = related_path['path']
+            this_path_ret = []
+            for hop_item_data in path:
+                # Warning! This doesn't support NetBox split cabling
+                # We assume there is always only one item!
+                hop_item_data = hop_item_data[0]
+                return_obj_class = self._get_obj_class(hop_item_data["url"])
+                this_path_ret.append(return_obj_class(hop_item_data, self.endpoint.api, self.endpoint))
+
+            ret.append(
+                {
+                    'origin': this_path_ret[0],
+                    'destination': this_path_ret[-1],
+                    'path': this_path_ret
+                }
+            )
+
+        return ret
+
 
 
 class DeviceTypes(Record):
@@ -170,11 +219,11 @@ class RUs(Record):
     device = Devices
 
 
-class FrontPorts(TraceableRecord):
+class FrontPorts(PathableRecord):
     device = Devices
 
 
-class RearPorts(TraceableRecord):
+class RearPorts(PathableRecord):
     device = Devices
 
 
