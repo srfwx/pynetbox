@@ -13,9 +13,10 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+
 from urllib.parse import urlsplit
 
-from pynetbox.core.endpoint import RODetailEndpoint
+from pynetbox.core.endpoint import DetailEndpoint, RODetailEndpoint
 from pynetbox.core.query import Request
 from pynetbox.core.response import JsonField, Record
 from pynetbox.models.circuits import Circuits
@@ -61,7 +62,7 @@ class TraceableRecord(Record):
         ).get()
 
         ret = []
-        for (a_terminations_data, cable_data, b_terminations_data) in req:
+        for a_terminations_data, cable_data, b_terminations_data in req:
             ret.append(self._build_termination_data(a_terminations_data))
             if not cable_data:
                 ret.append(cable_data)
@@ -76,7 +77,6 @@ class TraceableRecord(Record):
 
 
 class PathableRecord(Record):
-
     def _get_obj_class(self, url):
         uri_to_obj_class_map = {
             "dcim/cables": Cables,
@@ -113,7 +113,7 @@ class PathableRecord(Record):
         ret = []
 
         for related_path in req:
-            path = related_path['path']
+            path = related_path["path"]
             this_path_ret = []
             for hop_item_data in path:
                 termination_data = self._build_termination_data(hop_item_data)
@@ -126,7 +126,6 @@ class PathableRecord(Record):
             ret.append(this_path_ret)
 
         return ret
-
 
 
 class DeviceTypes(Record):
@@ -174,6 +173,23 @@ class Devices(Record):
 
         """
         return RODetailEndpoint(self, "napalm")
+
+    @property
+    def render_config(self):
+        """
+        Represents the ``render-config`` detail endpoint.
+
+        Returns a DetailEndpoint object that is the interface for
+        viewing response from the render-config endpoint.
+
+        :returns: :py:class:`.DetailEndpoint`
+
+        :Examples:
+
+        >>> device = nb.ipam.devices.get(123)
+        >>> device.render_config.create()
+        """
+        return DetailEndpoint(self, "render-config")
 
 
 class InterfaceConnections(Record):

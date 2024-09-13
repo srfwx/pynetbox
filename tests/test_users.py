@@ -11,7 +11,7 @@ api = pynetbox.api(
 
 nb = api.users
 
-HEADERS = {"accept": "application/json;"}
+HEADERS = {"accept": "application/json"}
 
 
 class Generic:
@@ -103,6 +103,15 @@ class PermissionsTestCase(Generic.Tests):
         self.assertEqual(len(permission.users), 1)
         user = permission.users[0]
         self.assertEqual(str(user), "user1")
+
+    @patch(
+        "requests.sessions.Session.get",
+        return_value=Response(fixture="users/permission.json"),
+    )
+    def test_constraints(self, _):
+        permission = nb.permissions.get(1)
+        self.assertIsInstance(permission.constraints, list)
+        self.assertIsInstance(permission.constraints[0], dict)
 
 
 class UnknownModelTestCase(unittest.TestCase):

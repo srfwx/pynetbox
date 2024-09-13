@@ -323,7 +323,7 @@ class Endpoint:
 
         >>> device = netbox.dcim.devices.create(
         ...    name='test',
-        ...    device_role=1,
+        ...    role=1,
         ... )
         >>>
 
@@ -344,14 +344,14 @@ class Endpoint:
         >>> nb.dcim.devices.create([
         ...     {
         ...         "name": "test1-core3",
-        ...         "device_role": 3,
+        ...         "role": 3,
         ...         "site": 1,
         ...         "device_type": 1,
         ...         "status": 1
         ...     },
         ...     {
         ...         "name": "test1-core4",
-        ...         "device_role": 3,
+        ...         "role": 3,
         ...         "site": 1,
         ...         "device_type": 1,
         ...         "status": 1
@@ -458,7 +458,9 @@ class Endpoint:
         series = []
         if not isinstance(objects, list):
             raise ValueError(
-                "Objects passed must be list[dict|Record] - was " + type(objects)
+                "Objects passed must be list[dict|Record] - was {}".format(
+                    type(objects)
+                )
             )
         for o in objects:
             if isinstance(o, Record):
@@ -472,7 +474,7 @@ class Endpoint:
                 series.append(o)
             else:
                 raise ValueError(
-                    "Object passed must be dict|Record - was " + type(objects)
+                    "Object passed must be dict|Record - was {}".format(type(objects))
                 )
         req = Request(
             base=self.url,

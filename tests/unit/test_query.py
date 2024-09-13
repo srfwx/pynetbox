@@ -17,18 +17,13 @@ class RequestTestCase(unittest.TestCase):
             "previous": False,
             "results": [],
         }
-        expected = call(
-            "http://localhost:8001/api/dcim/devices/",
-            params={"q": "abcd", "limit": 1},
-            headers={"accept": "application/json;"},
-        )
         test_obj.http_session.get.ok = True
         test = test_obj.get_count()
         self.assertEqual(test, 42)
         test_obj.http_session.get.assert_called_with(
             "http://localhost:8001/api/dcim/devices/",
-            params={"q": "abcd", "limit": 1},
-            headers={"accept": "application/json;"},
+            params={"q": "abcd", "limit": 1, "brief": 1},
+            headers={"accept": "application/json"},
             json=None,
         )
 
@@ -48,8 +43,8 @@ class RequestTestCase(unittest.TestCase):
         self.assertEqual(test, 42)
         test_obj.http_session.get.assert_called_with(
             "http://localhost:8001/api/dcim/devices/",
-            params={"limit": 1},
-            headers={"accept": "application/json;"},
+            params={"limit": 1, "brief": 1},
+            headers={"accept": "application/json"},
             json=None,
         )
 
@@ -69,7 +64,7 @@ class RequestTestCase(unittest.TestCase):
         expected = call(
             "http://localhost:8001/api/dcim/devices/",
             params={"offset": 20, "limit": 10},
-            headers={"accept": "application/json;"},
+            headers={"accept": "application/json"},
         )
         test_obj.http_session.get.ok = True
         generator = test_obj.get()
@@ -77,6 +72,6 @@ class RequestTestCase(unittest.TestCase):
         test_obj.http_session.get.assert_called_with(
             "http://localhost:8001/api/dcim/devices/",
             params={"offset": 20, "limit": 10},
-            headers={"accept": "application/json;"},
+            headers={"accept": "application/json"},
             json=None,
         )

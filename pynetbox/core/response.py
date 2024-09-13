@@ -226,7 +226,7 @@ class Record:
      'config_context': {},
      'created': '2018-04-01',
      'custom_fields': {},
-     'device_role': {'id': 1,
+     'role': {'id': 1,
                      'name': 'Test Switch',
                      'slug': 'test-switch',
                      'url': 'http://localhost:8000/api/dcim/device-roles/1/'},
@@ -413,6 +413,9 @@ class Record:
                 if len(v) and isinstance(v[0], dict) and "object_type" in v[0]:
                     v = [generic_list_parser(k, i) for i in v]
                     to_cache = list(v)
+                elif k == "constraints":
+                    # Permissions constraints can be either dict or list
+                    to_cache = copy.deepcopy(v)
                 else:
                     v = [list_parser(k, i) for i in v]
                     to_cache = list(v)

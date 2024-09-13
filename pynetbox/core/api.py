@@ -27,13 +27,15 @@ class Api:
     you can specify which app and endpoint you wish to interact with.
 
     Valid attributes currently are:
-        * dcim
-        * ipam
         * circuits
-        * tenancy
+        * core (NetBox 3.5+)
+        * dcim
         * extras
-        * virtualization
+        * ipam
+        * tenancy
         * users
+        * virtualization
+        * vpn (NetBox 3.7+)
         * wireless
 
     Calling any of these attributes will return
@@ -74,13 +76,15 @@ class Api:
         self.base_url = base_url
         self.http_session = requests.Session()
         self.threading = threading
-        self.dcim = App(self, "dcim")
-        self.ipam = App(self, "ipam")
         self.circuits = App(self, "circuits")
-        self.tenancy = App(self, "tenancy")
+        self.core = App(self, "core")
+        self.dcim = App(self, "dcim")
         self.extras = App(self, "extras")
-        self.virtualization = App(self, "virtualization")
+        self.ipam = App(self, "ipam")
+        self.tenancy = App(self, "tenancy")
         self.users = App(self, "users")
+        self.virtualization = App(self, "virtualization")
+        self.vpn = App(self, "vpn")
         self.wireless = App(self, "wireless")
         self.plugins = PluginsApp(self)
 
