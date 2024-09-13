@@ -13,6 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+
 from pynetbox.core.query import Request, RequestError
 from pynetbox.core.response import Record, RecordSet
 
@@ -285,8 +286,9 @@ class Endpoint:
         offset = kwargs.pop("offset") if "offset" in kwargs else None
         if limit == 0 and offset is not None:
             raise ValueError("offset requires a positive limit value")
+        filters = {x: y if y is not None else "null" for x, y in kwargs.items()}
         req = Request(
-            filters=kwargs,
+            filters=filters,
             base=self.url,
             token=self.token,
             http_session=self.api.http_session,

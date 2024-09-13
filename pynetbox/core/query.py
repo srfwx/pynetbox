@@ -13,8 +13,10 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+
 import concurrent.futures as cf
 import json
+
 from packaging import version
 
 
@@ -192,7 +194,7 @@ class Request:
             self.normalize_url(self.base),
             headers=headers,
         )
-        if req.ok:
+        if req.ok or req.status_code == 403:
             return req.headers.get("API-Version", "")
         else:
             raise RequestError(req)
