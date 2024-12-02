@@ -2,6 +2,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="pynetbox",
+    version="7.4.1-diploy",
     description="NetBox API client library",
     url="https://github.com/netbox-community/pynetbox",
     author="Zach Moody, Arthur Hanson",
@@ -9,7 +10,7 @@ setup(
     license="Apache2",
     include_package_data=True,
     use_scm_version=True,
-    setup_requires=["setuptools_scm"],
+    #setup_requires=["setuptools_scm"],
     packages=find_packages(exclude=["tests", "tests.*"]),
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
