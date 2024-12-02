@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="pynetbox",
-    version="7.4.1.2-diploy",
+    version="7.4.1",
     description="NetBox API client library",
     url="https://github.com/netbox-community/pynetbox",
     author="Zach Moody, Arthur Hanson",
