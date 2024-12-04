@@ -261,7 +261,6 @@ class Record:
 
     def __init__(self, values, api, endpoint):
         self.has_details = False
-        self._full_cache = []
         self._init_cache = []
         self.api = api
         self.default_ret = Record
@@ -403,11 +402,11 @@ class Record:
         url_path = url.replace(self.api.base_url, "")
         split_url_path = url_path.split("/")
         if split_url_path[1] == "plugins":
-            app = f"plugins/{split_url_path[2]}"
-            name = split_url_path[3]
+            app, name = split_url_path[2:4]
+            return getattr(getattr(getattr(self.api, "plugins"), app), name)
         else:
             app, name = split_url_path[1:3]
-        return getattr(pynetbox.core.app.App(self.api, app), name)
+            return getattr(getattr(self.api, app), name)
 
     def full_details(self):
         """Queries the hyperlinked endpoint if 'url' is defined.
