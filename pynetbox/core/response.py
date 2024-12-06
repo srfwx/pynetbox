@@ -32,10 +32,6 @@ def get_foreign_key(record):
         gfk = getattr(record, "id", None) or getattr(record, "value", None)
     elif isinstance(record, dict):
         gfk = record.get("id", None) or record.get("value", None)
-
-    if gfk is None:
-        raise ValueError("Unable to find a foreign key for the record.")
-
     return gfk
 
 
@@ -70,6 +66,8 @@ class CachedRecordRegistry:
     def __init__(self, api):
         self.api = api
         self._cache = {}
+        self._hit = 0
+        self._miss = 0
 
     def get(self, object_type, key):
         """
@@ -141,9 +139,6 @@ class RecordSet:
         except StopIteration:
             self._clear_endpoint_cache()
             raise
-
-    # def __del__(self):
-    #     self._clear_endpoint_cache()
 
     def _init_endpoint_cache(self):
         self.endpoint._cache = CachedRecordRegistry(self.endpoint.api)
@@ -389,17 +384,22 @@ class Record:
         else:
             return getattr(getattr(self.api, app), name)
 
-    def _get_or_init(self, object_type, key, value, model):
+    def _get_or_init(self, object_type, value, model):
         """
         Returns a record from the endpoint cache if it exists, otherwise
         initializes a new record, store it in the cache, and return it.
         """
-        if self._endpoint and self._endpoint._cache:
+        key = (
+            value.get("url", None) or value.get("id", None) or value.get("value", None)
+        )
+        if key and self._endpoint and self._endpoint._cache:
             if cached := self._endpoint._cache.get(object_type, key):
+                self._endpoint._cache._hit += 1
                 return cached
         model = model or Record
         record = model(value, self.api, None)
-        if self._endpoint and self._endpoint._cache:
+        if key and self._endpoint and self._endpoint._cache:
+            self._endpoint._cache._miss += 1
             self._endpoint._cache.set(object_type, key, record)
         return record
 
@@ -412,22 +412,30 @@ class Record:
 
         non_record_fields = ["custom_fields", "local_context_data"]
 
+        def deep_copy(value):
+            return marshal.loads(marshal.dumps(value))
+
         def dict_parser(key_name, value):
-            if key_name not in non_record_fields:
-                lookup = getattr(self.__class__, key_name, None)
-                if lookup is None or not issubclass(lookup, JsonField):
-                    fkey = get_foreign_key(value)
-                    value = self._get_or_init(key_name, fkey, value, lookup)
-                    return value, fkey
-            return value, marshal.loads(marshal.dumps(value))
+            if key_name in non_record_fields:
+                return value, deep_copy(value)
+
+            lookup = getattr(self.__class__, key_name, None)
+
+            if lookup and issubclass(lookup, JsonField):
+                return value, deep_copy(value)
+
+            if fkey := get_foreign_key(value):
+                value = self._get_or_init(key_name, value, lookup)
+                return value, fkey
+
+            return value, deep_copy(value)
 
         def generic_list_item_parser(list_item):
             from pynetbox.models.mapper import CONTENT_TYPE_MAPPER
 
             lookup = list_item["object_type"]
             if model := CONTENT_TYPE_MAPPER.get(lookup, None):
-                fkey = get_foreign_key(list_item["object"])
-                value = self._get_or_init(lookup, fkey, list_item["object"], model)
+                value = self._get_or_init(lookup, list_item["object"], model)
                 return value
             return list_item
 
@@ -436,7 +444,7 @@ class Record:
                 return value, []
 
             if key_name in ["constraints"]:
-                return value, marshal.loads(marshal.dumps(value))
+                return value, deep_copy(value)
 
             sample_item = value[0]
             if isinstance(sample_item, dict):
@@ -447,10 +455,7 @@ class Record:
                     # This is *list_parser*, so if the custom model field is not
                     # a list (or is not defined), just return the default model
                     model = lookup[0] if isinstance(lookup, list) else self.default_ret
-                    value = [
-                        self._get_or_init(key_name, get_foreign_key(i), i, model)
-                        for i in value
-                    ]
+                    value = [self._get_or_init(key_name, i, model) for i in value]
             return value, [*value]
 
         def parse_value(key_name, value):
