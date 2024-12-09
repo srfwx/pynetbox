@@ -15,7 +15,7 @@ limitations under the License.
 """
 
 import marshal
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 
 from pynetbox.core.query import Request
 from pynetbox.core.util import Hashabledict
@@ -49,6 +49,13 @@ def flatten_custom(custom_dict):
 
         ret[k] = current_val
     return ret
+
+
+def deep_copy(value):
+    return marshal.loads(marshal.dumps(value))
+
+
+AttrHandler = namedtuple("AttrHandler", ["model", "key", "cache_handler", "endpoint"])
 
 
 class JsonField:
@@ -371,11 +378,13 @@ class Record:
     @property
     def endpoint(self):
         if self._endpoint is None:
-            self._endpoint = self._endpoint_from_url()
+            self._endpoint = self._endpoint_from_url(self.url)
         return self._endpoint
 
-    def _endpoint_from_url(self):
-        url_path = self.url.replace(self.api.base_url, "").split("/")
+    def _endpoint_from_url(self, url):
+        if url is None:
+            return None
+        url_path = url.replace(self.api.base_url, "").split("/")
         is_plugin = url_path and url_path[1] == "plugins"
         start = 2 if is_plugin else 1
         app, name = [i.replace("-", "_") for i in url_path[start : start + 2]]
@@ -384,7 +393,161 @@ class Record:
         else:
             return getattr(getattr(self.api, app), name)
 
-    def _get_or_init(self, object_type, value, model):
+        # def dict_parser(key_name, value, model=None):
+        #     if key_name in non_record_dict_fields:
+        #         return value, deep_copy(value)
+
+        #     if model is None:
+        #         model = getattr(self.__class__, key_name, None)
+
+        #     if model and issubclass(model, JsonField):
+        #         return value, deep_copy(value)
+
+        #     if fkey := get_foreign_key(value):
+        #         value = self._get_or_init(key_name, value, model)
+        #         return value, fkey
+
+        #     return value, deep_copy(value)
+
+        # def mixed_list_parser(value):
+        #     from pynetbox.models.mapper import CONTENT_TYPE_MAPPER
+
+        #     parsed_list = []
+        #     for item in value:
+        #         lookup = item["object_type"]
+        #         if model := CONTENT_TYPE_MAPPER.get(lookup, None):
+        #             item = self._get_or_init(lookup, item["object"], model)
+        #         parsed_list.append(item)
+        #     return parsed_list
+
+        # def list_parser(key_name, value):
+        #     if not value:
+        #         return [], []
+
+        #     if key_name in ["constraints"]:
+        #         return value, deep_copy(value)
+
+        #     sample_item = value[0]
+        #     if not isinstance(sample_item, dict):
+        #         return value, [*value]
+
+        #     is_mixed_list = "object_type" in sample_item and "object" in sample_item
+        #     if is_mixed_list:
+        #         value = mixed_list_parser(value)
+        #     else:
+        #         lookup = getattr(self.__class__, key_name, None)
+        #         model = lookup[0] if isinstance(lookup, list) else self.default_ret
+        #         value = [dict_parser(key_name, i, model=model)[0] for i in value]
+
+        #     return value, [*value]
+
+        # def parse_value(key_name, value):
+        #     if isinstance(value, dict):
+        #         value, to_cache = dict_parser(key_name, value)
+        #     elif isinstance(value, list):
+        #         value, to_cache = list_parser(key_name, value)
+        #     else:
+        #         to_cache = value
+        #     setattr(self, key_name, value)
+        #     return to_cache
+
+        # self._init_cache = [(k, parse_value(k, v)) for k, v in values.items()]
+
+    # def _get_or_init(self, object_type, model, value):
+    #     """
+    #     Returns a record from the endpoint cache if it exists, otherwise
+    #     initializes a new record, store it in the cache, and return it.
+    #     """
+    #     key = (
+    #         value.get("url", None) or value.get("id", None) or value.get("value", None)
+    #     )
+    #     if key and self._endpoint and self._endpoint._cache:
+    #         if cached := self._endpoint._cache.get(object_type, key):
+    #             self._endpoint._cache._hit += 1
+    #             return cached
+    #     model = model or Record
+    #     record = model(value, self.api, None)
+    #     if key and self._endpoint and self._endpoint._cache:
+    #         self._endpoint._cache._miss += 1
+    #         self._endpoint._cache.set(object_type, key, record)
+    #     return record
+
+    def _get_handler_map(self, values):
+        if self.endpoint and self.endpoint._handler_map:
+            return self.endpoint._handler_map
+        map = self._build_handler_map(values)
+        if self.endpoint:
+            self.endpoint._handler_map = map
+        return map
+
+    def _build_handler_map(self, values):
+        non_record_dict_fields = ["custom_fields", "local_context_data"]
+
+        def dict_parser(key_name, value):
+            if key_name in non_record_dict_fields:
+                return default_dict_handler
+
+            model = getattr(self.__class__, key_name, None)
+
+            if model and issubclass(model, JsonField):
+                return default_dict_handler
+
+            if value.get("id"):
+                endpoint = self._endpoint_from_url(value.get("url"))
+                return AttrHandler(
+                    model=model or Record,
+                    key="id",
+                    cache_handler=None,
+                    endpoint=endpoint,
+                )
+
+            if value.get("value"):
+                return default_value_dict_handler
+
+            return default_dict_handler
+
+        if self.endpoint:
+            print("building handler map for", self.endpoint.name)
+        else:
+            return None
+
+        handler_map = {}
+        for k, v in values.items():
+            if isinstance(v, dict):
+                handler = dict_parser(k, v)
+            elif isinstance(v, list):
+                pass
+            else:
+                handler = None
+            handler_map[k] = handler
+
+        return handler_map
+
+    def _no_endpoint_init(self, values):
+        for k, v in values.items():
+            self._init_cache.append((k, v))
+            setattr(self, k, v)
+
+    def _transform(self, key, value, handler):
+        if handler.model:
+            value = self._get_or_init(key, handler.model, value)
+            return value, getattr(value, handler.key)
+        if handler.cache_handler:
+            return value, handler.cache_handler(value)
+        return value, value
+
+    def _with_endpoint_init(self, values, handler_map):
+        for k, v in values.items():
+            handler = handler_map.get(k)
+            if v is None or handler is None:
+                self._init_cache.append((k, v))
+                setattr(self, k, v)
+                continue
+            value, to_cache = self._transform(k, v, handler)
+            self._init_cache.append((k, to_cache))
+            setattr(self, k, value)
+
+    def _get_or_init(self, object_type, model, value):
         """
         Returns a record from the endpoint cache if it exists, otherwise
         initializes a new record, store it in the cache, and return it.
@@ -392,15 +555,15 @@ class Record:
         key = (
             value.get("url", None) or value.get("id", None) or value.get("value", None)
         )
-        if key and self._endpoint and self._endpoint._cache:
-            if cached := self._endpoint._cache.get(object_type, key):
-                self._endpoint._cache._hit += 1
+        if key and self.endpoint and self.endpoint._cache:
+            if cached := self.endpoint._cache.get(object_type, key):
+                self.endpoint._cache._hit += 1
                 return cached
         model = model or Record
         record = model(value, self.api, None)
-        if key and self._endpoint and self._endpoint._cache:
-            self._endpoint._cache._miss += 1
-            self._endpoint._cache.set(object_type, key, record)
+        if key and self.endpoint and self.endpoint._cache:
+            self.endpoint._cache._miss += 1
+            self.endpoint._cache.set(object_type, key, record)
         return record
 
     def _parse_values(self, values):
@@ -409,71 +572,11 @@ class Record:
         Parses values dict at init and sets object attributes with the
         values within.
         """
-
-        non_record_dict_fields = ["custom_fields", "local_context_data"]
-
-        def deep_copy(value):
-            return marshal.loads(marshal.dumps(value))
-
-        def dict_parser(key_name, value, model=None):
-            if key_name in non_record_dict_fields:
-                return value, deep_copy(value)
-
-            if model is None:
-                model = getattr(self.__class__, key_name, None)
-
-            if model and issubclass(model, JsonField):
-                return value, deep_copy(value)
-
-            if fkey := get_foreign_key(value):
-                value = self._get_or_init(key_name, value, model)
-                return value, fkey
-
-            return value, deep_copy(value)
-
-        def mixed_list_parser(value):
-            from pynetbox.models.mapper import CONTENT_TYPE_MAPPER
-
-            parsed_list = []
-            for item in value:
-                lookup = item["object_type"]
-                if model := CONTENT_TYPE_MAPPER.get(lookup, None):
-                    item = self._get_or_init(lookup, item["object"], model)
-                parsed_list.append(item)
-            return parsed_list
-
-        def list_parser(key_name, value):
-            if not value:
-                return [], []
-
-            if key_name in ["constraints"]:
-                return value, deep_copy(value)
-
-            sample_item = value[0]
-            if not isinstance(sample_item, dict):
-                return value, [*value]
-
-            is_mixed_list = "object_type" in sample_item and "object" in sample_item
-            if is_mixed_list:
-                value = mixed_list_parser(value)
-            else:
-                lookup = getattr(self.__class__, key_name, None)
-                model = lookup[0] if isinstance(lookup, list) else self.default_ret
-                value = [dict_parser(key_name, i, model=model)[0] for i in value]
-
-            return value, [*value]
-
-        def parse_value(key_name, value):
-            if isinstance(value, dict):
-                value, to_cache = dict_parser(key_name, value)
-            elif isinstance(value, list):
-                value, to_cache = list_parser(key_name, value)
-            else:
-                to_cache = value
-            setattr(self, key_name, value)
-            return to_cache
-
-        self._init_cache = [(k, parse_value(k, v)) for k, v in values.items()]
+        handler_map = self._get_handler_map(values)
+        if not handler_map:
+            self._no_endpoint_init(values)
+        else:
+            self._with_endpoint_init(values, handler_map)
 
     def full_details(self):
         """Queries the hyperlinked endpoint if 'url' is defined.
@@ -650,3 +753,11 @@ class Record:
             http_session=self.api.http_session,
         )
         return True if req.delete() else False
+
+
+default_dict_handler = AttrHandler(
+    model=None, key=None, cache_handler=deep_copy, endpoint=None
+)
+default_value_dict_handler = AttrHandler(
+    model=Record, key="value", cache_handler=None, endpoint=None
+)
