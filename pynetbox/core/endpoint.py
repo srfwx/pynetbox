@@ -84,6 +84,8 @@ class Endpoint:
             endpoint=self.name,
         )
         self._choices = None
+        self._attribute_type_map = {}
+        self._attribute_endpoint_map = {}
         self._init_cache()
 
     def _init_cache(self):
