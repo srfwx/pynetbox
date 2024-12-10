@@ -495,9 +495,12 @@ class Record(BaseRecord):
 
         attr_type_map = self.endpoint._attribute_type_map
         for key, value in values.items():
+            # We cannot infer a definitive type if the value is not set or is an empty list
             if value:
-                # We cannot infer a definitive type if the value is not set or is an empty list
-                if not (attr_type := attr_type_map.get(key, None)):
+                # We must check for .url here, because some specific Record
+                # on sub-endpoint, such as 'available-ips' don't have an URL and
+                # we create a collision in mapping
+                if self.url is None or not (attr_type := attr_type_map.get(key, None)):
                     attr_type = get_value_type(key, value)
                     self.endpoint._attribute_type_map[key] = attr_type
                 # Once we've got the type, we can process it faster
