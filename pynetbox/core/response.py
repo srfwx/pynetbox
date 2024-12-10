@@ -24,17 +24,6 @@ from pynetbox.core.util import Hashabledict
 LIST_AS_SET = ("tags", "tagged_vlans")
 
 
-def get_foreign_key(record):
-    """
-    Get the foreign key for Record objects and dictionaries.
-    """
-    if isinstance(record, Record):
-        gfk = getattr(record, "id", None) or getattr(record, "value", None)
-    elif isinstance(record, dict):
-        gfk = record.get("id", None) or record.get("value", None)
-    return gfk
-
-
 def flatten_custom(custom_dict):
     ret = {}
 
@@ -56,32 +45,6 @@ class JsonField:
     to a Record object"""
 
     _json_field = True
-
-
-class CachedRecordRegistry:
-    """
-    A cache for Record objects.
-    """
-
-    def __init__(self, api):
-        self.api = api
-        self._cache = {}
-        self._hit = 0
-        self._miss = 0
-
-    def get(self, object_type, key):
-        """
-        Retrieves a record from the cache
-        """
-        return self._cache.get(object_type, {}).get(key, None)
-
-    def set(self, object_type, key, value):
-        """
-        Stores a record in the cache
-        """
-        if object_type not in self._cache:
-            self._cache[object_type] = {}
-        self._cache[object_type][key] = value
 
 
 class RecordSet:
@@ -118,7 +81,6 @@ class RecordSet:
         self.request = request
         self.response = self.request.get()
         self._response_cache = []
-        self._init_endpoint_cache()
 
     def __iter__(self):
         return self
@@ -137,14 +99,8 @@ class RecordSet:
                 self.endpoint,
             )
         except StopIteration:
-            self._clear_endpoint_cache()
+            self.endpoint._init_cache()
             raise
-
-    def _init_endpoint_cache(self):
-        self.endpoint._cache = CachedRecordRegistry(self.endpoint.api)
-
-    def _clear_endpoint_cache(self):
-        self.endpoint._cache = None
 
     def __len__(self):
         try:
@@ -201,7 +157,56 @@ class RecordSet:
         return self.endpoint.delete(self)
 
 
-class Record:
+class BaseRecord:
+    def __init__(self):
+        self._init_cache = []
+
+    def __getitem__(self, k):
+        return dict(self)[k]
+
+    def __repr__(self):
+        return str(self)
+
+    def __getstate__(self):
+        return self.__dict__
+
+    def __setstate__(self, d):
+        self.__dict__.update(d)
+
+
+class ValueRecord(BaseRecord):
+    def __init__(self, values, *args, **kwargs):
+        super().__init__()
+        if values:
+            self._parse_values(values)
+
+    def __iter__(self):
+        for k, _ in self._init_cache:
+            cur_attr = getattr(self, k)
+            yield k, cur_attr
+
+    def __repr__(self):
+        return getattr(self, "label", "")
+
+    @property
+    def _key(self):
+        return getattr(self, "value")
+
+    def __eq__(self, other):
+        if isinstance(other, ValueRecord):
+            return self._foreign_key == other._foreign_key
+        return NotImplemented
+
+    def _parse_values(self, values):
+        for k, v in values.items():
+            self._init_cache.append((k, v))
+            setattr(self, k, v)
+
+    def serialize(self, nested=False):
+        return self._key if nested else dict(self)
+
+
+class Record(BaseRecord):
     """Create Python objects from NetBox API responses.
 
     Creates an object from a NetBox response passed as ``values``.
@@ -292,11 +297,9 @@ class Record:
 
     """
 
-    url = None
-
     def __init__(self, values, api, endpoint):
         self.has_details = False
-        self._init_cache = []
+        super().__init__()
         self.api = api
         self.default_ret = Record
         self.url = values.get("url", None) if values else None
@@ -325,17 +328,14 @@ class Record:
     def __iter__(self):
         for k, _ in self._init_cache:
             cur_attr = getattr(self, k)
-            if isinstance(cur_attr, Record):
+            if isinstance(cur_attr, BaseRecord):
                 yield k, dict(cur_attr)
             elif isinstance(cur_attr, list) and all(
-                isinstance(i, Record) for i in cur_attr
+                isinstance(i, (BaseRecord, GenericListObject)) for i in cur_attr
             ):
                 yield k, [dict(x) for x in cur_attr]
             else:
                 yield k, cur_attr
-
-    def __getitem__(self, k):
-        return dict(self)[k]
 
     def __str__(self):
         return (
@@ -344,15 +344,6 @@ class Record:
             or getattr(self, "display", None)
             or ""
         )
-
-    def __repr__(self):
-        return str(self)
-
-    def __getstate__(self):
-        return self.__dict__
-
-    def __setstate__(self, d):
-        self.__dict__.update(d)
 
     def __key__(self):
         if hasattr(self, "id"):
@@ -384,22 +375,16 @@ class Record:
         else:
             return getattr(getattr(self.api, app), name)
 
-    def _get_or_init(self, object_type, value, model):
+    def _get_or_init(self, object_type, key, value, model):
         """
         Returns a record from the endpoint cache if it exists, otherwise
         initializes a new record, store it in the cache, and return it.
         """
-        key = (
-            value.get("url", None) or value.get("id", None) or value.get("value", None)
-        )
-        if key and self._endpoint and self._endpoint._cache:
+        if self._endpoint:
             if cached := self._endpoint._cache.get(object_type, key):
-                self._endpoint._cache._hit += 1
                 return cached
-        model = model or Record
         record = model(value, self.api, None)
-        if key and self._endpoint and self._endpoint._cache:
-            self._endpoint._cache._miss += 1
+        if self._endpoint:
             self._endpoint._cache.set(object_type, key, record)
         return record
 
@@ -410,52 +395,64 @@ class Record:
         values within.
         """
 
-        non_record_fields = ["custom_fields", "local_context_data"]
+        non_record_dict_fields = ["custom_fields", "local_context_data"]
 
         def deep_copy(value):
             return marshal.loads(marshal.dumps(value))
 
-        def dict_parser(key_name, value):
-            if key_name in non_record_fields:
+        def dict_parser(key_name, value, model=None):
+            if key_name in non_record_dict_fields:
                 return value, deep_copy(value)
 
-            lookup = getattr(self.__class__, key_name, None)
+            if model is None:
+                model = getattr(self.__class__, key_name, None)
 
-            if lookup and issubclass(lookup, JsonField):
+            if model and issubclass(model, JsonField):
                 return value, deep_copy(value)
 
-            if fkey := get_foreign_key(value):
-                value = self._get_or_init(key_name, value, lookup)
-                return value, fkey
+            if (id := value.get("id", None)) and (url := value.get("url", None)):
+                model = model or Record
+                value = self._get_or_init(key_name, url, value, model)
+                return value, id
+
+            if record_value := value.get("value", None):
+                value = self._get_or_init(key_name, record_value, value, ValueRecord)
+                return value, record_value
 
             return value, deep_copy(value)
 
-        def generic_list_item_parser(list_item):
+        def generic_list_parser(value):
             from pynetbox.models.mapper import CONTENT_TYPE_MAPPER
 
-            lookup = list_item["object_type"]
-            if model := CONTENT_TYPE_MAPPER.get(lookup, None):
-                value = self._get_or_init(lookup, list_item["object"], model)
-                return value
-            return list_item
+            parsed_list = []
+            for item in value:
+                object_type = item["object_type"]
+                if model := CONTENT_TYPE_MAPPER.get(object_type, None):
+                    item = self._get_or_init(
+                        object_type, item["object"]["url"], item["object"], model
+                    )
+                parsed_list.append(GenericListObject(item))
+            return parsed_list
 
         def list_parser(key_name, value):
             if not value:
-                return value, []
+                return [], []
 
             if key_name in ["constraints"]:
                 return value, deep_copy(value)
 
             sample_item = value[0]
-            if isinstance(sample_item, dict):
-                if "object_type" in sample_item and "object" in sample_item:
-                    value = [generic_list_item_parser(item) for item in value]
-                else:
-                    lookup = getattr(self.__class__, key_name, None)
-                    # This is *list_parser*, so if the custom model field is not
-                    # a list (or is not defined), just return the default model
-                    model = lookup[0] if isinstance(lookup, list) else self.default_ret
-                    value = [self._get_or_init(key_name, i, model) for i in value]
+            if not isinstance(sample_item, dict):
+                return value, [*value]
+
+            is_generic_list = "object_type" in sample_item and "object" in sample_item
+            if is_generic_list:
+                value = generic_list_parser(value)
+            else:
+                lookup = getattr(self.__class__, key_name, None)
+                model = lookup[0] if isinstance(lookup, list) else self.default_ret
+                value = [dict_parser(key_name, i, model=model)[0] for i in value]
+
             return value, [*value]
 
         def parse_value(key_name, value):
@@ -500,6 +497,7 @@ class Record:
         If an attribute's value is a ``Record`` type it's replaced with
         the ``id`` field of that object.
 
+
         .. note::
 
             Using this to get a dictionary representation of the record
@@ -509,30 +507,37 @@ class Record:
         :returns: dict.
         """
         if nested:
-            return get_foreign_key(self)
+            return getattr(self, "id")
 
         if init:
             init_vals = dict(self._init_cache)
 
         ret = {}
+
         for i in dict(self):
             current_val = getattr(self, i) if not init else init_vals.get(i)
             if i == "custom_fields":
                 ret[i] = flatten_custom(current_val)
             else:
-                if isinstance(current_val, Record):
+                if isinstance(current_val, BaseRecord):
                     current_val = getattr(current_val, "serialize")(nested=True)
 
                 if isinstance(current_val, list):
-                    current_val = [
-                        v.id if isinstance(v, Record) else v for v in current_val
-                    ]
+                    serialized_list = []
+                    for v in current_val:
+                        if isinstance(v, BaseRecord):
+                            v = v.id
+                        elif isinstance(v, GenericListObject):
+                            v = v.serialize()
+                        serialized_list.append(v)
+                    current_val = serialized_list
                     if i in LIST_AS_SET and (
                         all([isinstance(v, str) for v in current_val])
                         or all([isinstance(v, int) for v in current_val])
                     ):
                         current_val = list(OrderedDict.fromkeys(current_val))
                 ret[i] = current_val
+
         return ret
 
     def _diff(self):
@@ -645,3 +650,29 @@ class Record:
             http_session=self.api.http_session,
         )
         return True if req.delete() else False
+
+
+class GenericListObject:
+    def __init__(self, record):
+        from pynetbox.models.mapper import TYPE_CONTENT_MAPPER
+
+        self.object = record
+        self.object_id = record.id
+        self.object_type = TYPE_CONTENT_MAPPER.get(record.__class__)
+
+    def __repr__(self):
+        return str(self.object)
+
+    def serialize(self):
+        ret = {k: getattr(self, k) for k in ["object_id", "object_type"]}
+        return ret
+
+    def __getattr__(self, k):
+        return getattr(self.object, k)
+
+    def __iter__(self):
+        for i in ["object_id", "object_type", "object"]:
+            cur_attr = getattr(self, i)
+            if isinstance(cur_attr, Record):
+                cur_attr = dict(cur_attr)
+            yield i, cur_attr
