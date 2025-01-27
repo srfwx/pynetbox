@@ -86,7 +86,6 @@ class RecordSet:
         return self
 
     def __next__(self):
-        print(self.endpoint._cache._hit, self.endpoint._cache._miss)
         if self._response_cache:
             return self.endpoint.return_obj(
                 self._response_cache.pop(),
