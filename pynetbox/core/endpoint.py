@@ -14,6 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import weakref
+
 from pynetbox.core.query import Request, RequestError
 from pynetbox.core.response import Record, RecordSet
 
@@ -108,6 +110,12 @@ class Endpoint:
             ret = Record
         return ret
 
+    def _build_recordset(self, request):
+        """Builds RecordSet object and ensures cache is discarded."""
+        record_set = RecordSet(self, request)
+        weakref.finalize(record_set, self._init_cache)
+        return record_set
+
     def all(self, limit=0, offset=None):
         """Queries the 'ListView' of a given endpoint.
 
@@ -151,7 +159,7 @@ class Endpoint:
             offset=offset,
         )
 
-        return RecordSet(self, req)
+        return self._build_recordset(req)
 
     def get(self, *args, **kwargs):
         r"""Queries the DetailsView of a given endpoint.
@@ -214,7 +222,7 @@ class Endpoint:
             http_session=self.api.http_session,
         )
         try:
-            return next(RecordSet(self, req), None)
+            return next(self._build_recordset(req), None)
         except RequestError as e:
             if e.req.status_code == 404:
                 return None
@@ -332,7 +340,7 @@ class Endpoint:
             offset=offset,
         )
 
-        return RecordSet(self, req)
+        return self._build_recordset(req)
 
     def create(self, *args, **kwargs):
         r"""Creates an object on an endpoint.

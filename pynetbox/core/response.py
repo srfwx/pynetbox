@@ -86,21 +86,18 @@ class RecordSet:
         return self
 
     def __next__(self):
-        try:
-            if self._response_cache:
-                return self.endpoint.return_obj(
-                    self._response_cache.pop(),
-                    self.endpoint.api,
-                    self.endpoint,
-                )
+        print(self.endpoint._cache._hit, self.endpoint._cache._miss)
+        if self._response_cache:
             return self.endpoint.return_obj(
-                next(self.response),
+                self._response_cache.pop(),
                 self.endpoint.api,
                 self.endpoint,
             )
-        except StopIteration:
-            self.endpoint._init_cache()
-            raise
+        return self.endpoint.return_obj(
+            next(self.response),
+            self.endpoint.api,
+            self.endpoint,
+        )
 
     def __len__(self):
         try:
