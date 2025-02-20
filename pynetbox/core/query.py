@@ -152,6 +152,7 @@ class Request:
         self.threading = threading
         self.limit = limit
         self.offset = offset
+        self.req = None
 
     def get_openapi(self):
         """Gets the OpenAPI Spec"""
@@ -243,6 +244,7 @@ class Request:
         req = getattr(self.http_session, verb)(
             url_override or self.url, headers=headers, params=params, json=data
         )
+        self.req = req
 
         if req.status_code == 409 and verb == "post":
             raise AllocationError(req)
