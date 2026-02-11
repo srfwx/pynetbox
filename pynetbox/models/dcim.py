@@ -20,7 +20,11 @@ from pynetbox.core.endpoint import (
     ROMultiFormatDetailEndpoint,
 )
 from pynetbox.core.query import Request
-from pynetbox.core.response import JsonField, PathableRecord, Record
+from pynetbox.core.response import (
+    JsonField,
+    PathableRecord as UpstreamPathableRecord,
+    Record,
+)
 from pynetbox.models.circuits import Circuits
 from pynetbox.models.ipam import IpAddresses
 
@@ -57,6 +61,37 @@ class TraceableRecord(Record):
             ret.append(self._build_termination_data(b_terminations_data))
 
         return ret
+
+
+class PathableRecord(UpstreamPathableRecord):
+    """Legacy-compatible path output for DCIM front/rear ports.
+
+    Upstream now returns:
+      [{"origin": ..., "destination": ..., "path": [...]}, ...]
+    This wrapper keeps the historical DCIM shape expected by diploy:
+      [[hop, cable, hop, ...], ...]
+    """
+
+    def paths(self):
+        upstream_paths = super().paths()
+        legacy_paths = []
+
+        for path_entry in upstream_paths:
+            path_segments = []
+            for segment in path_entry.get("path", []):
+                # Keep backward-compatible cable hop flattening:
+                # [Cable] -> Cable
+                if (
+                    isinstance(segment, list)
+                    and len(segment) == 1
+                    and isinstance(segment[0], Cables)
+                ):
+                    path_segments.append(segment[0])
+                else:
+                    path_segments.append(segment)
+            legacy_paths.append(path_segments)
+
+        return legacy_paths
 
 
 class DeviceTypes(Record):
