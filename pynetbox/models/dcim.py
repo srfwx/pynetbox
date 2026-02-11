@@ -59,58 +59,6 @@ class TraceableRecord(Record):
         return ret
 
 
-class PathableRecord(Record):
-    def _get_obj_class(self, url):
-        uri_to_obj_class_map = {
-            "dcim/cables": Cables,
-            "dcim/front-ports": FrontPorts,
-            "dcim/interfaces": Interfaces,
-            "dcim/rear-ports": RearPorts,
-        }
-
-        app_endpoint = "/".join(
-            urlsplit(url).path[len(urlsplit(self.api.base_url).path) :].split("/")[1:3]
-        )
-        return uri_to_obj_class_map.get(
-            app_endpoint,
-            Record,
-        )
-
-    def _build_termination_data(self, termination_list):
-        terminations_data = []
-        for hop_item_data in termination_list:
-            return_obj_class = self._get_obj_class(hop_item_data["url"])
-            terminations_data.append(
-                return_obj_class(hop_item_data, self.endpoint.api, self.endpoint)
-            )
-
-        return terminations_data
-
-    def paths(self):
-        req = Request(
-            key=str(self.id) + "/paths",
-            base=self.endpoint.url,
-            token=self.api.token,
-            http_session=self.api.http_session,
-        ).get()
-        ret = []
-
-        for related_path in req:
-            path = related_path["path"]
-            this_path_ret = []
-            for hop_item_data in path:
-                termination_data = self._build_termination_data(hop_item_data)
-                if isinstance(termination_data[0], Cables):
-                    # We mimick the output of the trace method where cables
-                    # are only a single hop
-                    termination_data = termination_data[0]
-                this_path_ret.append(termination_data)
-
-            ret.append(this_path_ret)
-
-        return ret
-
-
 class DeviceTypes(Record):
     def __str__(self):
         return self.model
