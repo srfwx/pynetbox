@@ -14,35 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from urllib.parse import urlsplit
-
-from pynetbox.core.endpoint import DetailEndpoint, RODetailEndpoint
+from pynetbox.core.endpoint import (
+    DetailEndpoint,
+    RODetailEndpoint,
+    ROMultiFormatDetailEndpoint,
+)
 from pynetbox.core.query import Request
-from pynetbox.core.response import JsonField, Record
+from pynetbox.core.response import JsonField, PathableRecord, Record
 from pynetbox.models.circuits import Circuits
 from pynetbox.models.ipam import IpAddresses
 
 
 class TraceableRecord(Record):
-    def _get_obj_class(self, url):
-        uri_to_obj_class_map = {
-            "dcim/cables": Cables,
-            "dcim/front-ports": FrontPorts,
-            "dcim/interfaces": Interfaces,
-            "dcim/rear-ports": RearPorts,
-        }
-
-        # the url for this item will be something like:
-        #     https://netbox/api/dcim/rear-ports/12761/
-        # TODO: Move this to a more general function.
-        app_endpoint = "/".join(
-            urlsplit(url).path[len(urlsplit(self.api.base_url).path) :].split("/")[1:3]
-        )
-        return uri_to_obj_class_map.get(
-            app_endpoint,
-            Record,
-        )
-
     def _build_termination_data(self, termination_list):
         terminations_data = []
         for hop_item_data in termination_list:
@@ -134,18 +117,18 @@ class DeviceTypes(Record):
 
 
 class Devices(Record):
-    """Devices Object
+    """Devices Object.
 
     Represents a device response from netbox.
 
-    Attributes:
-        primary_ip, ip4, ip6 (list): Tells __init__ in Record() to
-            take the `primary_ip` field's value from the API
-            response and return an initialized list of IpAddress
-            objects
-        device_type (obj): Tells __init__ in Record() to take the
-            `device_type` field's value from the API response and
-            return an initialized DeviceType object
+    ## Attributes
+    * **primary_ip, ip4, ip6** (list): Tells __init__ in Record() to
+        take the `primary_ip` field's value from the API
+        response and return an initialized list of IpAddress
+        objects
+    * **device_type** (obj): Tells __init__ in Record() to take the
+        `device_type` field's value from the API response and
+        return an initialized DeviceType object
     """
 
     has_details = True
@@ -163,31 +146,35 @@ class Devices(Record):
         Returns a DetailEndpoint object that is the interface for
         viewing response from the napalm endpoint.
 
-        :returns: :py:class:`.DetailEndpoint`
+        ## Returns
+        DetailEndpoint object.
 
-        :Examples:
+        ## Examples
 
-        >>> device = nb.ipam.devices.get(123)
-        >>> device.napalm.list(method='get_facts')
-        {"get_facts": {"interface_list": ["ge-0/0/0"]}}
-
+        ```python
+        device = nb.ipam.devices.get(123)
+        device.napalm.list(method='get_facts')
+        # {"get_facts": {"interface_list": ["ge-0/0/0"]}}
+        ```
         """
         return RODetailEndpoint(self, "napalm")
 
     @property
     def render_config(self):
-        """
-        Represents the ``render-config`` detail endpoint.
+        """Represents the ``render-config`` detail endpoint.
 
         Returns a DetailEndpoint object that is the interface for
         viewing response from the render-config endpoint.
 
-        :returns: :py:class:`.DetailEndpoint`
+        ## Returns
+        DetailEndpoint object.
 
-        :Examples:
+        ## Examples
 
-        >>> device = nb.ipam.devices.get(123)
-        >>> device.render_config.create()
+        ```python
+        device = nb.ipam.devices.get(123)
+        device.render_config.create()
+        ```
         """
         return DetailEndpoint(self, "render-config")
 
@@ -205,6 +192,10 @@ class InterfaceConnection(Record):
 class Interfaces(TraceableRecord):
     device = Devices
     interface_connection = InterfaceConnection
+
+
+class PowerFeeds(TraceableRecord):
+    pass
 
 
 class PowerOutlets(TraceableRecord):
@@ -252,14 +243,16 @@ class Racks(Record):
         Returns a DetailEndpoint object that is the interface for
         viewing response from the units endpoint.
 
-        :returns: :py:class:`.DetailEndpoint`
+        ## Returns
+        DetailEndpoint object.
 
-        :Examples:
+        ## Examples
 
-        >>> rack = nb.dcim.racks.get(123)
-        >>> rack.units.list()
-        {"get_facts": {"interface_list": ["ge-0/0/0"]}}
-
+        ```python
+        rack = nb.dcim.racks.get(123)
+        rack.units.list()
+        # {"get_facts": {"interface_list": ["ge-0/0/0"]}}
+        ```
         """
         return RODetailEndpoint(self, "units", custom_return=RUs)
 
@@ -267,20 +260,26 @@ class Racks(Record):
     def elevation(self):
         """Represents the ``elevation`` detail endpoint.
 
-        Returns a DetailEndpoint object that is the interface for
-        viewing response from the elevation endpoint updated in
-        Netbox version 2.8.
+        Returns a multi-format endpoint supporting both JSON and SVG responses.
+        The elevation endpoint provides rack unit information and can render
+        graphical elevation views.
 
-        :returns: :py:class:`.DetailEndpoint`
+        ## Returns
+        ROMultiFormatDetailEndpoint object supporting JSON and SVG formats.
 
-        :Examples:
+        ## Examples
 
-        >>> rack = nb.dcim.racks.get(123)
-        >>> rack.elevation.list()
-        {"get_facts": {"interface_list": ["ge-0/0/0"]}}
+        ```python
+        rack = nb.dcim.racks.get(123)
 
+        # Get rack units as JSON (list of RU objects)
+        rack.elevation.list()
+
+        # Get elevation as SVG diagram
+        svg = rack.elevation.list(render='svg')
+        ```
         """
-        return RODetailEndpoint(self, "elevation", custom_return=RUs)
+        return ROMultiFormatDetailEndpoint(self, "elevation", custom_return=RUs)
 
 
 class Termination(Record):

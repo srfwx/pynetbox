@@ -26,12 +26,12 @@ def get_netbox_docker_version_tag(netbox_version):
     """
     major, minor = netbox_version.major, netbox_version.minor
 
-    if (major, minor) == (3, 6):
-        tag = "2.7.0"
-    elif (major, minor) == (3, 7):
-        tag = "2.8.0"
-    elif (major, minor) == (4, 0):
-        tag = "2.9.1"
+    if (major, minor) == (4, 2):
+        tag = "3.2.1"
+    elif (major, minor) == (4, 3):
+        tag = "3.3.0"
+    elif (major, minor) == (4, 4):
+        tag = "3.4.2"
     else:
         raise NotImplementedError(
             "Version %s is not currently supported" % netbox_version
@@ -263,6 +263,16 @@ def docker_compose_file(pytestconfig, netbox_docker_repo_dirpaths):
                     # ensure the netbox container listens on a random port
                     new_services[new_service_name]["ports"] = ["8080"]
 
+                    # Increase health check timeouts for GitHub Actions runners
+                    # which may have more resource constraints
+                    new_services[new_service_name]["healthcheck"] = {
+                        "test": "curl -f http://localhost:8080/login/ || exit 1",
+                        "start_period": "180s",  # Increased from 90s
+                        "timeout": "10s",  # Increased from 3s
+                        "interval": "15s",
+                        "retries": 5,
+                    }
+
                 # set the network and an alias to the proper short name of the container
                 # within that network
                 new_services[new_service_name]["networks"] = {
@@ -486,6 +496,37 @@ def role(api):
     )
     yield role
     role.delete()
+
+
+def create_device(api, site, device_type, role, name):
+    """Helper function to create a device with proper version handling.
+
+    Args:
+        api: The API instance
+        site: Site object
+        device_type: DeviceType object
+        role: DeviceRole object
+        name: Device name
+
+    Returns:
+        Created device object
+    """
+    from packaging import version
+
+    if version.parse(api.version) >= version.parse("3.6"):
+        return api.dcim.devices.create(
+            name=name,
+            role=role.id,
+            device_type=device_type.id,
+            site=site.id,
+        )
+    else:
+        return api.dcim.devices.create(
+            name=name,
+            device_role=role.id,
+            device_type=device_type.id,
+            site=site.id,
+        )
 
 
 def pytest_generate_tests(metafunc):

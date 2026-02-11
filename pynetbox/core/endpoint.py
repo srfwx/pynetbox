@@ -17,6 +17,7 @@ limitations under the License.
 import weakref
 
 from pynetbox.core.query import Request, RequestError
+from pynetbox.core.query import ParameterValidationError
 from pynetbox.core.response import Record, RecordSet
 
 RESERVED_KWARGS = ()
@@ -60,24 +61,26 @@ class Endpoint:
     url to make queries to and the proper Response object to return
     results in.
 
-    :arg obj api: Takes :py:class:`.Api` created at instantiation.
-    :arg obj app: Takes :py:class:`.App`.
-    :arg str name: Name of endpoint passed to App().
-    :arg obj,optional model: Custom model for given app.
+    ## Parameters
 
-    .. note::
+    * **api** (Api): Takes Api created at instantiation.
+    * **app** (App): Takes App.
+    * **name** (str): Name of endpoint passed to App().
+    * **model** (obj, optional): Custom model for given app.
 
-        In order to call NetBox endpoints with dashes in their
-        names you should convert the dash to an underscore.
-        (E.g. querying the ip-addresses endpoint is done with
-        ``nb.ipam.ip_addresses.all()``.)
+    ## Note
 
+    In order to call NetBox endpoints with dashes in their
+    names you should convert the dash to an underscore.
+    (E.g. querying the ip-addresses endpoint is done with
+    ``nb.ipam.ip_addresses.all()``.)
     """
 
     def __init__(self, api, app, name, model=None):
         self.name = name.replace("_", "-")
         self.return_obj = self._lookup_ret_obj(model)
         self.api = api
+        self.app = app
         self.base_url = api.base_url
         self.token = api.token
         self.url = "{base_url}/{app}/{endpoint}".format(
@@ -97,11 +100,13 @@ class Endpoint:
         This method loads a unique response object for an endpoint if
         it exists. Otherwise return a generic `Record` object.
 
-        :arg str name: Endpoint name.
-        :arg obj model: The application model that
-            contains unique Record objects.
+        ## Parameters
 
-        :Returns: Record (obj)
+        * **name** (str): Endpoint name.
+        * **model** (obj): The application model that contains unique Record objects.
+
+        ## Returns
+        Record (obj)
         """
         if model:
             name = self.name.title().replace("-", "")
@@ -116,37 +121,94 @@ class Endpoint:
         weakref.finalize(record_set, self._init_cache)
         return record_set
 
+    def _validate_openapi_parameters(self, method: str, parameters: dict) -> None:
+        """Validate GET request parameters against OpenAPI specification
+
+        This method raises a **ParameterValidationError** if parameters passed to NetBox API
+        do not match the OpenAPI specification or validation fails.
+
+        ## Parameters
+
+        * **method** : Only "get" is supported as for other methods NetBox already does proper validation
+        * **parameters** : kwargs passed to filter() method
+
+        ## Returns
+        None
+        """
+        if method.lower() != "get":
+            raise RuntimeError(f"Unsupported method '{method}'.")
+
+        openapi_definition_path = "/api/{app}/{endpoint}/".format(
+            app=self.app.name,
+            endpoint=self.name,
+        )
+
+        # Parse NetBox OpenAPI definition
+        try:
+            openapi_definition = self.api.openapi()["paths"].get(
+                openapi_definition_path
+            )
+
+            if not openapi_definition:
+                raise ParameterValidationError(
+                    f"Path '{openapi_definition_path}' does not exist in NetBox OpenAPI specification."
+                )
+
+            openapi_parameters = openapi_definition[method]["parameters"]
+            allowed_parameters = [p["name"] for p in openapi_parameters]
+
+        except KeyError as exc:
+            raise ParameterValidationError(
+                f"Error while parsing Netbox OpenAPI specification: {exc}"
+            )
+
+        # Validate all parameters
+        validation_errors = []
+        for p in parameters:
+            if p not in allowed_parameters:
+                validation_errors.append(
+                    f"'{p}' is not allowed as parameter on path '{openapi_definition_path}'."
+                )
+
+        if len(validation_errors) > 0:
+            raise ParameterValidationError(validation_errors)
+
     def all(self, limit=0, offset=None):
         """Queries the 'ListView' of a given endpoint.
 
         Returns all objects from an endpoint.
 
-        :arg int,optional limit: Overrides the max page size on
-            paginated returns.  This defines the number of records that will
-            be returned with each query to the Netbox server.  The queries
+        ## Parameters
+
+        * **limit** (int, optional): Overrides the max page size on
+            paginated returns. This defines the number of records that will
+            be returned with each query to the Netbox server. The queries
             will be made as you iterate through the result set.
-        :arg int,optional offset: Overrides the offset on paginated returns.
+        * **offset** (int, optional): Overrides the offset on paginated returns.
 
-        :Returns: A :py:class:`.RecordSet` object.
+        ## Returns
+        A RecordSet object.
 
-        :Examples:
+        ## Examples
 
-        >>> devices = list(nb.dcim.devices.all())
-        >>> for device in devices:
-        ...     print(device.name)
-        ...
-        test1-leaf1
-        test1-leaf2
-        test1-leaf3
-        >>>
+        ```python
+        devices = list(nb.dcim.devices.all())
+        for device in devices:
+            print(device.name)
+
+        # test1-leaf1
+        # test1-leaf2
+        # test1-leaf3
+        ```
 
         If you want to iterate over the results multiple times then
         encapsulate them in a list like this:
-        >>> devices = list(nb.dcim.devices.all())
+        ```python
+        devices = list(nb.dcim.devices.all())
+        ```
 
         This will cause the entire result set
         to be fetched from the server.
-
         """
         if limit == 0 and offset is not None:
             raise ValueError("offset requires a positive limit value")
@@ -162,39 +224,45 @@ class Endpoint:
         return self._build_recordset(req)
 
     def get(self, *args, **kwargs):
-        r"""Queries the DetailsView of a given endpoint.
+        """Queries the DetailsView of a given endpoint.
 
-        :arg int,optional key: id for the item to be
-            retrieved.
+        ## Parameters
 
-        :arg str,optional \**kwargs: Accepts the same keyword args as
-            filter(). Any search argument the endpoint accepts can
+        * **key** (int, optional): id for the item to be retrieved.
+        * **kwargs**: Accepts the same keyword args as filter(). Any search argument the endpoint accepts can
             be added as a keyword arg.
+        * **strict_filters** (bool, optional): Overrides the global filter
+            validation per-request basis. Handled by the filter() method.
 
-        :returns: A single :py:class:`.Record` object or None
+        ## Returns
+        A single Record object or None
 
-        :raises ValueError: if kwarg search return more than one value.
+        ## Raises
+        ValueError: if kwarg search return more than one value.
 
-        :Examples:
+        ## Examples
 
-        Referencing with a kwarg that only returns one value.
+        Referencing with a kwarg that only returns one value:
 
-        >>> nb.dcim.devices.get(name='test1-a3-tor1b')
-        test1-a3-tor1b
-        >>>
+        ```python
+        nb.dcim.devices.get(name='test1-a3-tor1b')
+        # test1-a3-tor1b
+        ```
 
-        Referencing with an id.
+        Referencing with an id:
 
-        >>> nb.dcim.devices.get(1)
-        test1-edge1
-        >>>
+        ```python
+        nb.dcim.devices.get(1)
+        # test1-edge1
+        ```
 
-        Using multiple named arguments. For example, retriving the location when the location name is not unique and used in multiple sites.
+        Using multiple named arguments. For example, retrieving the location when the location name is not unique and used in multiple sites:
 
-        >>> nb.locations.get(site='site-1', name='Row 1')
-        Row 1
+        ```python
+        nb.locations.get(site='site-1', name='Row 1')
+        # Row 1
+        ```
         """
-
         try:
             key = args[0]
         except IndexError:
@@ -230,91 +298,68 @@ class Endpoint:
                 raise e
 
     def filter(self, *args, **kwargs):
-        r"""Queries the 'ListView' of a given endpoint.
+        """Queries the 'ListView' of a given endpoint.
 
         Takes named arguments that match the usable filters on a
         given endpoint. If an argument is passed then it's used as a
         freeform search argument if the endpoint supports it.
 
-        :arg str,optional \*args: Freeform search string that's
+        ## Parameters
+
+        * **args** (str, optional): Freeform search string that's
             accepted on given endpoint.
-        :arg str,optional \**kwargs: Any search argument the
+        * **kwargs** (str, optional): Any search argument the
             endpoint accepts can be added as a keyword arg.
-        :arg int,optional limit: Overrides the max page size on
-            paginated returns.  This defines the number of records that will
-            be returned with each query to the Netbox server.  The queries
+        * **limit** (int, optional): Overrides the max page size on
+            paginated returns. This defines the number of records that will
+            be returned with each query to the Netbox server. The queries
             will be made as you iterate through the result set.
-        :arg int,optional offset: Overrides the offset on paginated returns.
+        * **offset** (int, optional): Overrides the offset on paginated returns.
+        * **strict_filters** (bool, optional): Overrides the global filter
+            validation per-request basis.
 
-        :Returns: A :py:class:`.RecordSet` object.
+        ## Returns
+        A RecordSet object.
 
-        :Examples:
+        ## Examples
 
-        To return a list of objects matching a named argument filter.
+        To return a list of objects matching a named argument filter:
 
-        >>> devices = nb.dcim.devices.filter(role='leaf-switch')
-        >>> for device in devices:
-        ...     print(device.name)
-        ...
-        test1-leaf1
-        test1-leaf2
-        test1-leaf3
-        >>>
+        ```python
+        devices = nb.dcim.devices.filter(role='leaf-switch')
+        for device in devices:
+            print(device.name)
 
-        >>> devices = nb.dcim.devices.filter(site='site-1')
-        >>> for device in devices:
-        ...     print(device.name)
-        ...
-        test1-a2-leaf1
-        test2-a2-leaf2
-        >>>
+        # test1-leaf1
+        # test1-leaf2
+        # test1-leaf3
+        ```
 
-        If we want to filter by site, location, tenant, or fields which have a display name and a slug, the slug has to be used for filtering.
+        ```python
+        devices = nb.dcim.devices.filter(site='site-1')
+        for device in devices:
+            print(device.name)
 
-        .. note::
+        # test1-a2-leaf1
+        # test2-a2-leaf2
+        ```
 
-          If a keyword argument is incorrect a `TypeError` will not be returned by pynetbox.
-          Instead, all records filtered up to the last correct keyword argument. For example, if we used `site="Site 1"` instead of `site=site-1` when using filter on
-          the devices endpoint, then pynetbox will return **all** devices across all sites instead of devices at Site 1.
+        ## Note
 
+        If a keyword argument is incorrect a `TypeError` will not be returned by pynetbox.
+        Instead, pynetbox will return all records filtered up to the last correct keyword argument. For example, if we used `site="Site 1"` instead of `site=site-1` when using filter on
+        the devices endpoint, then pynetbox will return **all** devices across all sites instead of devices at Site 1.
 
-        Using a freeform query along with a named argument.
+        Using a freeform query along with a named argument:
 
-        >>> devices = nb.dcim.devices.filter('a3', role='leaf-switch')
-        >>> for device in devices:
-        ...     print(device.name)
-        ...
-        test1-a3-leaf1
-        test1-a3-leaf2
-        >>>
+        ```python
+        devices = nb.dcim.devices.filter('a3', role='leaf-switch')
+        for device in devices:
+            print(device.name)
 
-
-        Chaining multiple named arguments.
-
-        >>> devices = nb.dcim.devices.filter(role='leaf-switch', status=True)
-        >>> for device in devices:
-        ...     print(device.name)
-        ...
-        test1-leaf2
-        >>>
-
-        Passing a list as a named argument adds multiple filters of the
-        same value.
-
-        >>> devices = nb.dcim.devices.filter(role=['leaf-switch', 'spine-switch'])
-        >>> for device in devices:
-        ...     print(device.name)
-        ...
-        test1-a3-spine1
-        test1-a3-spine2
-        test1-a3-leaf1
-        >>>
-
-        To have the ability to iterate over the results multiple times then
-        encapsulate them in a list.  This will cause the entire result set
-        to be fetched from the server.
-
-        >>> devices = list(nb.dcim.devices.filter(role='leaf-switch'))
+        # test1-a3-leaf1
+        # test1-a3-leaf2
+        ```
         """
 
         if args:
@@ -327,9 +372,20 @@ class Endpoint:
             )
         limit = kwargs.pop("limit") if "limit" in kwargs else 0
         offset = kwargs.pop("offset") if "offset" in kwargs else None
+        strict_filters = (
+            # kwargs value takes precedence on globally set value
+            kwargs.pop("strict_filters")
+            if "strict_filters" in kwargs
+            else self.api.strict_filters
+        )
+
         if limit == 0 and offset is not None:
             raise ValueError("offset requires a positive limit value")
         filters = {x: y if y is not None else "null" for x, y in kwargs.items()}
+
+        if strict_filters:
+            self._validate_openapi_parameters("get", filters)
+
         req = Request(
             filters=filters,
             base=self.url,
@@ -343,114 +399,42 @@ class Endpoint:
         return self._build_recordset(req)
 
     def create(self, *args, **kwargs):
-        r"""Creates an object on an endpoint.
+        """Creates an object on an endpoint.
 
-        Allows for the creation of new objects on an endpoint. Named
-        arguments are converted to json properties, and a single object
-        is created. NetBox's bulk creation capabilities can be used by
-        passing a list of dictionaries as the first argument.
+        Takes named arguments that match the given endpoint's
+        available fields. Returns a new object.
 
-        .. note:
+        ## Parameters
 
-            Any positional arguments will supercede named ones.
+        * **args**: Not used.
+        * **kwargs**: Fields and values to create the object with.
 
-        :arg list \*args: A list of dictionaries containing the
-            properties of the objects to be created.
-        :arg str \**kwargs: key/value strings representing
-            properties on a json object.
+        ## Returns
+        A Record object.
 
-        :returns: A list or single :py:class:`.Record` object depending
-            on whether a bulk creation was requested.
+        ## Examples
 
-        :Examples:
+        Creating a new device:
 
-        Creating an object on the `devices` endpoint:
+        ```python
+        new_device = nb.dcim.devices.create(
+            name='test-device',
+            device_type=1,
+            device_role=1,
+            site=1
+        )
+        ```
 
-        >>> device = netbox.dcim.devices.create(
-        ...    name='test',
-        ...    role=1,
-        ... )
-        >>>
+        Creating a new device with a nested object:
 
-        Creating an object on the 'devices' endpoint using `.get()` to get ids.
-
-        >>> device = netbox.dcim.devices.create(
-        ...     name = 'test1',
-        ...     site = netbox.dcim.devices.get(name='site1').id,
-        ...     location = netbox.dcim.locations.get(name='Row 1').id,
-        ...     rack = netbox.dcim.racks.get(facility_id=1).id,
-        ...     device_type = netbox.dcim.device_types.get(slug='server-type-1').id,
-        ...     status='active',
-        ...     )
-        >>>
-
-        Use bulk creation by passing a list of dictionaries:
-
-        >>> nb.dcim.devices.create([
-        ...     {
-        ...         "name": "test1-core3",
-        ...         "role": 3,
-        ...         "site": 1,
-        ...         "device_type": 1,
-        ...         "status": 1
-        ...     },
-        ...     {
-        ...         "name": "test1-core4",
-        ...         "role": 3,
-        ...         "site": 1,
-        ...         "device_type": 1,
-        ...         "status": 1
-        ...     }
-        ... ])
-
-        Create a new device type.
-
-        >>> device_type = netbox.dcim.devices.create(
-        ...     manufacturer = netbox.dcim.manufacturers.get(name='manufacturer-name').id,
-        ...     model = 'device-type-name',
-        ...     slug = 'device-type-slug',
-        ...     subdevice_role = 'child or parent', #optional field - requred if creating a device type to be used by child devices
-        ...     u_height = unit_height, #can only equal 0 if the device type is for a child device - requires subdevice_role='child' if that is the case
-        ...     custom_fields = {'cf_1' : 'custom data 1'}
-        ...     )
-
-        Create a device bay and child device.
-
-        >>> device_bay = netbox.dcim.device_bays.create(
-        ...     device = netbox.dcim.devices.get(name='parent device').id, # device the device bay is located
-        ...     name = 'Bay 1'
-        ...     )
-        >>> child_device = netbox.dcim.devices.create(
-        ...     name = 'child device',
-        ...     site = netbox.dcim.devices.get(name='test-site').id,
-        ...     location = netbox.dcim.locations.get(name='row-1').id,
-        ...     tenant = netbox.tenancy.tenants.get(name='tenant-1').id,
-        ...     manufactuer = netbox.dcim.manufacturers.get(name='test-m').id,
-        ...     rack = netbox.dcim.racks.get(name='Test Rack').id,
-        ...     device_type = netbox.dcim.device.types.get(slug='test-server').id, #easier to get device_type id by search by its slug rather than by its name
-        ...     )
-        >>> get_device_bay = netbox.dcim.device_bays.get(name='Bay 1')
-        >>> get_child_device = netbox.dcim.devices.get(name='child device')
-        >>> get_device_bay.installed_device = get_child_device
-        >>> get_device_bay.save()
-
-        Create a network interface
-
-        >>> interface = netbox.dcim.interfaces.get(name="interface-test", device="test-device")
-        >>> netbox_ip = netbox.ipam.ip_addresses.create(
-        ... address = "ip-address",
-        ... tenant = netbox.tenancy.tenants.get(name='tenant-1').id,
-        ... tags = [{'name':'Tag 1'}],
-        ... )
-        >>> #assign IP Address to device's network interface
-        >>> netbox_ip.assigned_object = interface
-        >>> netbox_ip.assigned_object_id = interface.id
-        >>> netbox_ip.assigned_object_type = 'dcim.interface'
-        >>> # add dns name to IP Address (optional)
-        >>> netbox_ip.dns_name = "test.dns.local"
-        >>> # save changes to IP Address
-        >>> netbox_ip.save()
-
+        ```python
+        new_device = nb.dcim.devices.create(
+            name='test-device',
+            device_type={'id': 1},
+            device_role={'id': 1},
+            site={'id': 1}
+        )
+        ```
         """
 
         req = Request(
@@ -464,41 +448,25 @@ class Endpoint:
         return self.return_obj(req, self.api, self)
 
     def update(self, objects):
-        r"""Bulk updates existing objects on an endpoint.
+        """Updates objects in NetBox.
 
-        Allows for bulk updating of existing objects on an endpoint.
-        Objects is a list whic contain either json/dicts or Record
-        derived objects, which contain the updates to apply.
-        If json/dicts are used, then the id of the object *must* be
-        included
+        Takes a list of objects and updates them in NetBox.
 
-        :arg list objects: A list of dicts or Record.
+        ## Parameters
 
-        :returns: True if the update succeeded
+        * **objects** (list): A list of Record objects to update.
 
-        :Examples:
+        ## Returns
+        A list of Record objects.
 
-        Updating objects on the `devices` endpoint:
+        ## Examples
 
-        >>> devices = nb.dcim.devices.update([
-        ...    {'id': 1, 'name': 'test'},
-        ...    {'id': 2, 'name': 'test2'},
-        ... ])
-        >>> devices
-        [test2, test]
-        >>>
-
-        Use bulk update by passing a list of Records:
-
-        >>> devices = list(nb.dcim.devices.filter())
-        >>> devices
-        [Device1, Device2, Device3]
-        >>> for d in devices:
-        ...     d.name = d.name+'-test'
-        ...
-        >>> nb.dcim.devices.update(devices)
-        [Device1-test, Device2-test, Device3-test]
-        >>>
+        ```python
+        devices = nb.dcim.devices.filter(site='test1')
+        for device in devices:
+            device.status = 'active'
+        nb.dcim.devices.update(devices)
+        ```
         """
         series = []
         if not isinstance(objects, list):
@@ -532,34 +500,23 @@ class Endpoint:
         return self.return_obj(req, self.api, self)
 
     def delete(self, objects):
-        r"""Bulk deletes objects on an endpoint.
+        """Deletes objects from NetBox.
 
-        Allows for batch deletion of multiple objects from
-        a single endpoint
+        Takes a list of objects and deletes them from NetBox.
 
-        :arg list objects: A list of either ids or Records or
-            a single RecordSet to delete.
-        :returns: True if bulk DELETE operation was successful.
+        ## Parameters
 
-        :Examples:
+        * **objects** (list): A list of Record objects to delete.
 
-        Deleting all `devices`:
+        ## Returns
+        True if the delete operation was successful.
 
-        >>> netbox.dcim.devices.delete(netbox.dcim.devices.all(0))
-        >>>
+        ## Examples
 
-        Use bulk deletion by passing a list of ids:
-
-        >>> netbox.dcim.devices.delete([2, 243, 431, 700])
-        >>>
-
-        Use bulk deletion to delete objects eg. when filtering
-        on a `custom_field`:
-        >>> netbox.dcim.devices.delete([
-        >>>         d for d in netbox.dcim.devices.all(0) \
-        >>>             if d.custom_fields.get('field', False)
-        >>>     ])
-        >>>
+        ```python
+        devices = nb.dcim.devices.filter(site='test1')
+        nb.dcim.devices.delete(devices)
+        ```
         """
         cleaned_ids = []
         if not isinstance(objects, list) and not isinstance(objects, RecordSet):
@@ -593,34 +550,21 @@ class Endpoint:
         return True if req.delete(data=[{"id": i} for i in cleaned_ids]) else False
 
     def choices(self):
-        """Returns all choices from the endpoint.
+        """Returns all choices from the endpoint if it has them.
 
-        The returned dict is also saved in the endpoint object (in
-        ``_choices`` attribute) so that later calls will return the same data
-        without recurring requests to NetBox. When using ``.choices()`` in
-        long-running applications, consider restarting them whenever NetBox is
-        upgraded, to prevent using stale choices data.
+        ## Returns
+        Dictionary of available choices.
 
-        :Returns: Dict containing the available choices.
+        ## Examples
 
-        :Example:
-
-        >>> from pprint import pprint
-        >>> pprint(nb.ipam.ip_addresses.choices())
-        {'role': [{'display_name': 'Loopback', 'value': 'loopback'},
-                  {'display_name': 'Secondary', 'value': 'secondary'},
-                  {'display_name': 'Anycast', 'value': 'anycast'},
-                  {'display_name': 'VIP', 'value': 'vip'},
-                  {'display_name': 'VRRP', 'value': 'vrrp'},
-                  {'display_name': 'HSRP', 'value': 'hsrp'},
-                  {'display_name': 'GLBP', 'value': 'glbp'},
-                  {'display_name': 'CARP', 'value': 'carp'}],
-         'status': [{'display_name': 'Active', 'value': 'active'},
-                    {'display_name': 'Reserved', 'value': 'reserved'},
-                    {'display_name': 'Deprecated', 'value': 'deprecated'},
-                    {'display_name': 'DHCP', 'value': 'dhcp'},
-                    {'display_name': 'SLAAC', 'value': 'slaac'}]}
-        >>>
+        ```python
+        choices = nb.dcim.devices.choices()
+        print(choices['status'])
+        {
+            'label': 'Active',
+            'value': 'active'
+        }
+        ```
         """
         if self._choices:
             return self._choices
@@ -630,9 +574,10 @@ class Endpoint:
             token=self.api.token,
             http_session=self.api.http_session,
         ).options()
-        try:
-            post_data = req["actions"]["POST"]
-        except KeyError:
+
+        actions = req.get("actions", {})
+        post_data = actions.get("POST") or actions.get("PUT")
+        if post_data is None:
             raise ValueError(
                 "Unexpected format in the OPTIONS response at {}".format(self.url)
             )
@@ -644,34 +589,28 @@ class Endpoint:
         return self._choices
 
     def count(self, *args, **kwargs):
-        r"""Returns the count of objects in a query.
+        """Returns the count of objects in a query.
 
         Takes named arguments that match the usable filters on a
         given endpoint. If an argument is passed then it's used as a
-        freeform search argument if the endpoint supports it. If no
-        arguments are passed the count for all objects on an endpoint
-        are returned.
+        freeform search argument if the endpoint supports it.
 
-        :arg str,optional \*args: Freeform search string that's
+        ## Parameters
+
+        * **args** (str, optional): Freeform search string that's
             accepted on given endpoint.
-        :arg str,optional \**kwargs: Any search argument the
+        * **kwargs** (str, optional): Any search argument the
             endpoint accepts can be added as a keyword arg.
 
-        :Returns: Integer with count of objects returns by query.
+        ## Returns
+        Integer of count of objects.
 
-        :Examples:
+        ## Examples
 
-        To return a count of objects matching a named argument filter.
-
-        >>> nb.dcim.devices.count(site='tst1')
-        5827
-        >>>
-
-        To return a count of objects on an entire endpoint.
-
-        >>> nb.dcim.devices.count()
-        87382
-        >>>
+        ```python
+        nb.dcim.devices.count(site='test1')
+        # 27
+        ```
         """
 
         if args:
@@ -696,7 +635,7 @@ class Endpoint:
 class DetailEndpoint:
     """Enables read/write operations on detail endpoints.
 
-    Endpoints like ``available-ips`` that are detail routes off
+    Endpoints like `available-ips` that are detail routes off
     traditional endpoints are handled with this class.
     """
 
@@ -711,17 +650,20 @@ class DetailEndpoint:
         )
 
     def list(self, **kwargs):
-        r"""The view operation for a detail endpoint
+        """The view operation for a detail endpoint.
 
         Returns the response from NetBox for a detail endpoint.
 
-        :args \**kwargs: key/value pairs that get converted into url
-            parameters when passed to the endpoint.
-            E.g. ``.list(method='get_facts')`` would be converted to
-            ``.../?method=get_facts``.
+        ## Parameters
 
-        :returns: A :py:class:`.Record` object or list of :py:class:`.Record` objects created
-            from data retrieved from NetBox.
+        * **kwargs**: Key/value pairs that get converted into URL
+            parameters when passed to the endpoint.
+            E.g. `.list(method='get_facts')` would be converted to
+            `.../?method=get_facts`.
+
+        ## Returns
+        A Record object or list of Record objects created
+        from data retrieved from NetBox.
         """
         req = Request(**self.request_kwargs).get(add_params=kwargs)
 
@@ -739,13 +681,16 @@ class DetailEndpoint:
 
         Creates objects on a detail endpoint in NetBox.
 
-        :arg dict/list,optional data: A dictionary containing the
+        ## Parameters
+
+        * **data** (dict/list, optional): A dictionary containing the
             key/value pair of the items you're creating on the parent
             object. Defaults to empty dict which will create a single
             item with default values.
 
-        :returns: A :py:class:`.Record` object or list of :py:class:`.Record` objects created
-            from data created in NetBox.
+        ## Returns
+        A Record object or list of Record objects created
+        from data created in NetBox.
         """
         data = data or {}
         req = Request(**self.request_kwargs).post(data)
@@ -767,3 +712,54 @@ class DetailEndpoint:
 class RODetailEndpoint(DetailEndpoint):
     def create(self, data):
         raise NotImplementedError("Writes are not supported for this endpoint.")
+
+
+class ROMultiFormatDetailEndpoint(RODetailEndpoint):
+    """Read-only detail endpoint supporting multiple response formats.
+
+    Handles endpoints that return data in different formats based on
+    query parameters. Supports both structured data (JSON) and raw formats
+    (e.g., SVG).
+
+    The endpoint inspects the 'render' parameter to determine response format:
+    - No parameter or render='json': Returns structured JSON data
+    - render='svg': Returns raw SVG content
+
+    ## Examples
+
+    ```python
+    rack = nb.dcim.racks.get(123)
+    rack.elevation.list()  # Returns: list of rack unit objects
+    rack.elevation.list(render='svg')  # Returns: SVG string
+    rack.elevation.list(render='json')  # Returns: list of rack unit objects
+    ```
+    """
+
+    def list(self, **kwargs):
+        """Returns data in the requested format.
+
+        ## Parameters
+
+        * **kwargs**: Key/value pairs that get converted into URL
+            parameters. Supports 'render' parameter for format selection.
+
+        ## Returns
+
+        - If render is non-JSON format: Raw content (string)
+        - If render is 'json' or absent: Structured data (list/generator)
+        """
+        # Check if non-JSON format requested
+        render_format = kwargs.get("render")
+        if render_format == "svg":
+            # Pass expect_json=False for raw SVG response
+            req = Request(**self.request_kwargs, expect_json=False).get(
+                add_params=kwargs
+            )
+            # Return raw content for non-JSON formats
+            return next(req)
+
+        if render_format != "json" and render_format is not None:
+            raise ValueError(f"Unsupported render format: {render_format}")
+
+        # Return structured JSON response via parent class
+        return super().list(**kwargs)

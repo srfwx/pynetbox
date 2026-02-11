@@ -15,7 +15,7 @@ limitations under the License.
 """
 
 import marshal
-from collections import OrderedDict
+from urllib.parse import urlsplit
 
 from pynetbox.core.query import Request
 from pynetbox.core.util import Hashabledict
@@ -42,7 +42,7 @@ def flatten_custom(custom_dict):
 
 class JsonField:
     """Explicit field type for values that are not to be converted
-    to a Record object"""
+    to a Record object."""
 
     _json_field = True
 
@@ -50,30 +50,31 @@ class JsonField:
 class RecordSet:
     """Iterator containing Record objects.
 
-    Returned by :py:meth:`.Endpoint.all()` and :py:meth:`.Endpoint.filter()` methods.
+    Returned by `Endpoint.all()` and `Endpoint.filter()` methods.
     Allows iteration of and actions to be taken on the results from the aforementioned
-    methods. Contains :py:class:`.Record` objects.
+    methods. Contains Record objects.
 
-    :Examples:
+    ## Examples
 
-    To see how many results are in a query by calling ``len()``:
+    To see how many results are in a query by calling `len()`:
 
-    >>> x = nb.dcim.devices.all()
-    >>> len(x)
-    123
-    >>>
+    ```python
+    x = nb.dcim.devices.all()
+    len(x)
+    # 123
+    ```
 
     Simple iteration of the results:
 
-    >>> devices = nb.dcim.devices.all()
-    >>> for device in devices:
-    ...     print(device.name)
-    ...
-    test1-leaf1
-    test1-leaf2
-    test1-leaf3
-    >>>
+    ```python
+    devices = nb.dcim.devices.all()
+    for device in devices:
+        print(device.name)
 
+    # test1-leaf1
+    # test1-leaf2
+    # test1-leaf3
+    ```
     """
 
     def __init__(self, endpoint, request, **kwargs):
@@ -112,14 +113,17 @@ class RecordSet:
         """Updates kwargs onto all Records in the RecordSet and saves these.
 
         Updates are only sent to the API if a value were changed, and only for
-        the Records which were changed
+        the Records which were changed.
 
-        :returns: True if the update succeeded, None if no update were required
-        :example:
+        ## Returns
+        True if the update succeeded, None if no update were required.
 
-        >>> result = nb.dcim.devices.filter(site_id=1).update(status='active')
-        True
-        >>>
+        ## Examples
+
+        ```python
+        result = nb.dcim.devices.filter(site_id=1).update(status='active')
+        # True
+        ```
         """
         updates = []
         for record in self:
@@ -137,18 +141,20 @@ class RecordSet:
             return None
 
     def delete(self):
-        r"""Bulk deletes objects in a RecordSet.
+        """Bulk deletes objects in a RecordSet.
 
-        Allows for batch deletion of multiple objects in a RecordSet
+        Allows for batch deletion of multiple objects in a RecordSet.
 
-        :returns: True if bulk DELETE operation was successful.
+        ## Returns
+        True if bulk DELETE operation was successful.
 
-        :Examples:
+        ## Examples
 
         Deleting offline `devices` on site 1:
 
-        >>> netbox.dcim.devices.filter(site_id=1, status="offline").delete()
-        >>>
+        ```python
+        netbox.dcim.devices.filter(site_id=1, status="offline").delete()
+        ```
         """
         return self.endpoint.delete(self)
 
@@ -205,93 +211,120 @@ class ValueRecord(BaseRecord):
 class Record(BaseRecord):
     """Create Python objects from NetBox API responses.
 
-    Creates an object from a NetBox response passed as ``values``.
+    Creates an object from a NetBox response passed as `values`.
     Nested dicts that represent other endpoints are also turned
-    into ``Record`` objects. All fields are then assigned to the
+    into Record objects. All fields are then assigned to the
     object's attributes. If a missing attr is requested
     (e.g. requesting a field that's only present on a full response on
-    a ``Record`` made from a nested response) then pynetbox will make a
+    a Record made from a nested response) then pynetbox will make a
     request for the full object and return the requested value.
 
-    :examples:
+    ## Examples
 
     Default representation of the object is usually its name:
 
-    >>> x = nb.dcim.devices.get(1)
-    >>> x
-    test1-switch1
-    >>>
+    ```python
+    x = nb.dcim.devices.get(1)
+    x
+    # test1-switch1
+    ```
 
     Querying a string field:
 
-    >>> x = nb.dcim.devices.get(1)
-    >>> x.serial
-    'ABC123'
-    >>>
+    ```python
+    x = nb.dcim.devices.get(1)
+    x.serial
+    # 'ABC123'
+    ```
 
     Querying a field on a nested object:
 
-    >>> x = nb.dcim.devices.get(1)
-    >>> x.device_type.model
-    'QFX5100-24Q'
-    >>>
+    ```python
+    x = nb.dcim.devices.get(1)
+    x.device_type.model
+    # 'QFX5100-24Q'
+    ```
 
     Casting the object as a dictionary:
 
-    >>> from pprint import pprint
-    >>> pprint(dict(x))
-    {'asset_tag': None,
-     'cluster': None,
-     'comments': '',
-     'config_context': {},
-     'created': '2018-04-01',
-     'custom_fields': {},
-     'role': {'id': 1,
-                     'name': 'Test Switch',
-                     'slug': 'test-switch',
-                     'url': 'http://localhost:8000/api/dcim/device-roles/1/'},
-     'device_type': {...},
-     'display_name': 'test1-switch1',
-     'face': {'label': 'Rear', 'value': 1},
-     'id': 1,
-     'name': 'test1-switch1',
-     'parent_device': None,
-     'platform': {...},
-     'position': 1,
-     'primary_ip': {'address': '192.0.2.1/24',
-                    'family': 4,
-                    'id': 1,
-                    'url': 'http://localhost:8000/api/ipam/ip-addresses/1/'},
-     'primary_ip4': {...},
-     'primary_ip6': None,
-     'rack': {'display_name': 'Test Rack',
-              'id': 1,
-              'name': 'Test Rack',
-              'url': 'http://localhost:8000/api/dcim/racks/1/'},
-     'serial': 'ABC123',
-     'site': {'id': 1,
-              'name': 'TEST',
-              'slug': 'TEST',
-              'url': 'http://localhost:8000/api/dcim/sites/1/'},
-     'status': {'label': 'Active', 'value': 1},
-     'tags': [],
-     'tenant': None,
-     'vc_position': None,
-     'vc_priority': None,
-     'virtual_chassis': None}
-     >>>
+    ```python
+    from pprint import pprint
+    pprint(dict(x))
+    {
+        'asset_tag': None,
+        'cluster': None,
+        'comments': '',
+        'config_context': {},
+        'created': '2018-04-01',
+        'custom_fields': {},
+        'role': {
+            'id': 1,
+            'name': 'Test Switch',
+            'slug': 'test-switch',
+            'url': 'http://localhost:8000/api/dcim/device-roles/1/'
+        },
+        'device_type': {...},
+        'display_name': 'test1-switch1',
+        'face': {'label': 'Rear', 'value': 1},
+        'id': 1,
+        'name': 'test1-switch1',
+        'parent_device': None,
+        'platform': {...},
+        'position': 1,
+        'primary_ip': {
+            'address': '192.0.2.1/24',
+            'family': 4,
+            'id': 1,
+            'url': 'http://localhost:8000/api/ipam/ip-addresses/1/'
+        },
+        'primary_ip4': {...},
+        'primary_ip6': None,
+        'rack': {
+            'display_name': 'Test Rack',
+            'id': 1,
+            'name': 'Test Rack',
+            'url': 'http://localhost:8000/api/dcim/racks/1/'
+        },
+        'site': {
+            'id': 1,
+            'name': 'TEST',
+            'slug': 'TEST',
+            'url': 'http://localhost:8000/api/dcim/sites/1/'
+        },
+        'status': {'label': 'Active', 'value': 1},
+        'tags': [],
+        'tenant': None,
+        'vc_position': None,
+        'vc_priority': None,
+        'virtual_chassis': None
+    }
+    ```
 
-     Iterating over a ``Record`` object:
+    Iterating over a Record object:
 
-    >>> for i in x:
-    ...  print(i)
-    ...
-    ('id', 1)
-    ('name', 'test1-switch1')
-    ('display_name', 'test1-switch1')
-    >>>
+    ```python
+    for i in x:
+        print(i)
 
+    # ('id', 1)
+    # ('name', 'test1-switch1')
+    # ('display_name', 'test1-switch1')
+    ```
     """
+
+    url = None
+
+    # Internal Record metadata that should not be serialized for API updates.
+    # These are object bookkeeping attributes, not NetBox API fields.
+    _INTERNAL_ATTRS = frozenset(
+        [
+            "api",  # API client instance
+            "endpoint",  # Endpoint object reference
+            "url",  # Object URL (read-only field provided by API)
+            "has_details",  # Flag for lazy-loading full details
+            "default_ret",  # Default Record class for nested objects
+        ]
+    )
 
     def __init__(self, values, api, endpoint):
         self.has_details = False
@@ -383,6 +416,55 @@ class Record(BaseRecord):
         if self._endpoint:
             self._endpoint._cache.set(object_type, key, record)
         return record
+
+    def _extract_app_endpoint(self, url):
+        """Extract app/endpoint from a NetBox API URL.
+
+        Extracts the app and endpoint portion from a URL like:
+            https://netbox/api/dcim/rear-ports/12761/
+        Returns:
+            String like "dcim/rear-ports"
+        """
+        app_endpoint = "/".join(
+            urlsplit(url).path[len(urlsplit(self.api.base_url).path) :].split("/")[1:3]
+        )
+        return app_endpoint
+
+    def _get_obj_class(self, url):
+        """Map API URL to corresponding Record class for cable tracing.
+
+        Used by TraceableRecord and PathableRecord to deserialize objects
+        encountered in cable trace/path responses.
+        """
+        # Import here to avoid circular dependency
+        from pynetbox.models.circuits import CircuitTerminations
+        from pynetbox.models.dcim import (
+            Cables,
+            ConsolePorts,
+            ConsoleServerPorts,
+            FrontPorts,
+            Interfaces,
+            PowerFeeds,
+            PowerOutlets,
+            PowerPorts,
+            RearPorts,
+        )
+
+        uri_to_obj_class_map = {
+            "circuits/circuit-terminations": CircuitTerminations,
+            "dcim/cables": Cables,
+            "dcim/console-ports": ConsolePorts,
+            "dcim/console-server-ports": ConsoleServerPorts,
+            "dcim/front-ports": FrontPorts,
+            "dcim/interfaces": Interfaces,
+            "dcim/power-feeds": PowerFeeds,
+            "dcim/power-outlets": PowerOutlets,
+            "dcim/power-ports": PowerPorts,
+            "dcim/rear-ports": RearPorts,
+        }
+
+        app_endpoint = self._extract_app_endpoint(url)
+        return uri_to_obj_class_map.get(app_endpoint, Record)
 
     def _parse_values(self, values):
         """Parses values init arg.
@@ -493,6 +575,14 @@ class Record(BaseRecord):
         If an attribute's value is a ``Record`` type it's replaced with
         the ``id`` field of that object.
 
+        When ``init=False`` (default), includes both original fields from the
+        API response and any fields that have been set on the object after
+        initialization. This allows proper change detection for fields set
+        to None or other values.
+
+        When ``init=True``, returns only the original fields from the initial
+        API response, used for comparing against the current state to detect
+        changes.
 
         .. note::
 
@@ -505,13 +595,31 @@ class Record(BaseRecord):
         if nested:
             return getattr(self, "id")
 
+        # Determine which fields to serialize
         if init:
-            init_vals = dict(self._init_cache)
+            # For initial state, use only _init_cache
+            init_cache_dict = dict(self._init_cache)
+            fields_to_serialize = init_cache_dict.keys()
+            init_vals = init_cache_dict
+        else:
+            # For current state, include all fields (original + modified)
+            init_cache_keys = {k for k, _ in self._init_cache}
+
+            # Get all non-internal field names from object's __dict__
+            obj_keys = {
+                k
+                for k in self.__dict__.keys()
+                if not k.startswith("_") and k not in self._INTERNAL_ATTRS
+            }
+
+            # Combine both sets
+            fields_to_serialize = init_cache_keys | obj_keys
+            init_vals = {}  # Not used when init=False
 
         ret = {}
 
-        for i in dict(self):
-            current_val = getattr(self, i) if not init else init_vals.get(i)
+        for i in fields_to_serialize:
+            current_val = getattr(self, i, None) if not init else init_vals.get(i)
             if i == "custom_fields":
                 ret[i] = flatten_custom(current_val)
             else:
@@ -521,17 +629,17 @@ class Record(BaseRecord):
                 if isinstance(current_val, list):
                     serialized_list = []
                     for v in current_val:
-                        if isinstance(v, BaseRecord):
-                            v = v.id
-                        elif isinstance(v, GenericListObject):
+                        if isinstance(v, GenericListObject):
                             v = v.serialize()
+                        elif isinstance(v, BaseRecord):
+                            v = v.id
                         serialized_list.append(v)
                     current_val = serialized_list
                     if i in LIST_AS_SET and (
                         all([isinstance(v, str) for v in current_val])
                         or all([isinstance(v, int) for v in current_val])
                     ):
-                        current_val = list(OrderedDict.fromkeys(current_val))
+                        current_val = list(dict.fromkeys(current_val))
                 ret[i] = current_val
 
         return ret
@@ -599,7 +707,10 @@ class Record(BaseRecord):
                 token=self.api.token,
                 http_session=self.api.http_session,
             )
-            if req.patch(updates):
+            result = req.patch(updates)
+            if result:
+                # Update object state with response from PATCH to keep cache in sync
+                self._parse_values(result)
                 return True
         return False
 
@@ -646,6 +757,64 @@ class Record(BaseRecord):
             http_session=self.api.http_session,
         )
         return True if req.delete() else False
+
+
+class PathableRecord(Record):
+    """Record class for objects that support cable path tracing via /paths endpoint.
+
+    Front ports, rear ports, and circuit terminations use the /paths endpoint
+    to show complete cable paths from origin to destination.
+    """
+
+    def _build_endpoint_object(self, endpoint_data):
+        if not endpoint_data:
+            return None
+
+        return_obj_class = self._get_obj_class(endpoint_data["url"])
+        return return_obj_class(endpoint_data, self.endpoint.api, self.endpoint)
+
+    def paths(self):
+        """Return all cable paths traversing this pass-through port.
+
+        Returns a list of dictionaries, each containing:
+        - origin: The starting endpoint of the path (or None if not connected)
+        - destination: The ending endpoint of the path (or None if not connected)
+        - path: List of path segments, where each segment is a list of Record objects
+                (similar to the trace() endpoint structure)
+        """
+        req = Request(
+            key=str(self.id) + "/paths",
+            base=self.endpoint.url,
+            token=self.api.token,
+            http_session=self.api.http_session,
+        ).get()
+
+        ret = []
+        for path_data in req:
+            path_segments = []
+            for segment_data in path_data.get("path", []):
+                segment_objects = []
+                if isinstance(segment_data, list):
+                    for item_data in segment_data:
+                        segment_obj = self._build_endpoint_object(item_data)
+                        if segment_obj:
+                            segment_objects.append(segment_obj)
+                else:
+                    segment_obj = self._build_endpoint_object(segment_data)
+                    if segment_obj:
+                        segment_objects.append(segment_obj)
+                path_segments.append(segment_objects)
+
+            origin = self._build_endpoint_object(path_data.get("origin"))
+            destination = self._build_endpoint_object(path_data.get("destination"))
+
+            ret.append({
+                "origin": origin,
+                "destination": destination,
+                "path": path_segments,
+            })
+
+        return ret
 
 
 class GenericListObject:

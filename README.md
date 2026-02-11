@@ -9,6 +9,12 @@ Each pyNetBox Version listed below has been tested with its corresponding NetBox
 
 | NetBox Version | Plugin Version |
 |:--------------:|:--------------:|
+|      4.5       |     7.6.1      |
+|      4.5       |     7.6.0      |
+|      4.4       |     7.5.0      |
+|      4.3       |     7.5.0      |
+|      4.2       |     7.5.0      |
+|      4.1       |     7.5.0      |
 |      4.0.6     |     7.4.1      |
 |      4.0.0     |     7.3.4      |
 |      3.7       |     7.3.0      |
@@ -25,7 +31,7 @@ Alternatively, you can clone the repo and run `python setup.py install`.
 
 ## Quick Start
 
-The full pynetbox API is documented on [Read the Docs](http://pynetbox.readthedocs.io/en/latest/), but the following should be enough to get started using it.
+The full pynetbox API is documented on [GitHub Pages](https://netbox-community.github.io/pynetbox/), but the following should be enough to get started using it.
 
 To begin, import pynetbox and instantiate the API.
 
@@ -70,11 +76,51 @@ nb = pynetbox.api(
     threading=True,
 )
 ```
+### Filters validation
 
-## Alternative Library
+NetBox doesn't validate filters passed to the GET API endpoints, which are accessed with `.get()` and `.filter()`. If a filter is incorrect, NetBox silently returns the entire database table content. Pynetbox allows to check provided parameters against NetBox OpenAPI specification before doing the call, and raise an exception if a parameter is incorrect.
 
-> **Note:** For those interested in a different approach, there is an alternative Python API client library available for NetBox called [netbox-python](https://github.com/netbox-community/netbox-python). This library provides a thin Python wrapper over the NetBox API.
+This can be enabled globally by setting `strict_filters=True` in the API object initialization:
 
-[netbox-python](https://github.com/netbox-community/netbox-python) offers a minimalistic interface to interact with NetBox's API. While it may not provide all the features available in pynetbox, it offers a lightweight and straightforward option for interfacing with NetBox.
+```python
+nb = pynetbox.api(
+    'http://localhost:8000',
+    strict_filters=True,
+)
+```
 
-To explore further details and access the documentation, please visit the [netbox-python](https://github.com/netbox-community/netbox-python).
+This can also be enabled and disabled on a per-request basis:
+
+```python
+# Disable for one request when enabled globally.
+# Will not raise an exception and return the entire Device table.
+nb.dcim.devices.filter(non_existing_filter="aaaa", strict_filters=False)
+
+# Enable for one request when not enabled globally.
+# Will raise an exception.
+nb.dcim.devices.filter(non_existing_filter="aaaa", strict_filters=True)
+```
+
+## Running Tests
+
+First, create and activate a Python virtual environment in the pynetbox directory to isolate the project dependencies:
+
+```python
+python3 -m venv venv
+source venv/bin/activate
+```
+
+Install both requirements files:
+
+```python
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+```
+
+The test suite requires Docker to be installed and running, as it will download and launch netbox-docker containers during test execution.
+
+With Docker installed and running, execute the following command to run the test suite:
+
+```python
+pytest
+```

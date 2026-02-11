@@ -1,7 +1,7 @@
 ---
 name: ✨ Feature Request
 description: Propose a new pynetbox feature or enhancement
-labels: ["type: feature"]
+labels: ["app: pynetbox", "type: feature", "status: needs triage"]
 body:
   - type: markdown
     attributes:

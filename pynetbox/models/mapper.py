@@ -1,4 +1,10 @@
-from .circuits import Circuits, CircuitTerminations
+from .circuits import (
+    Circuits,
+    CircuitTerminations,
+    VirtualCircuits,
+    VirtualCircuitTerminations,
+)
+from .core import DataSources, Jobs, ObjectChanges
 from .dcim import (
     Cables,
     ConsolePorts,
@@ -7,6 +13,7 @@ from .dcim import (
     DeviceTypes,
     FrontPorts,
     Interfaces,
+    PowerFeeds,
     PowerOutlets,
     PowerPorts,
     RackReservations,
@@ -22,6 +29,11 @@ from .wireless import WirelessLans
 CONTENT_TYPE_MAPPER = {
     "circuits.circuit": Circuits,
     "circuits.circuittermination": CircuitTerminations,
+    "circuits.virtualcircuit": VirtualCircuits,
+    "circuits.virtualcircuittermination": VirtualCircuitTerminations,
+    "core.datasource": DataSources,
+    "core.job": Jobs,
+    "core.objectchange": ObjectChanges,
     "dcim.cable": Cables,
     "dcim.cablepath": None,
     "dcim.cabletermination": Termination,
@@ -48,7 +60,7 @@ CONTENT_TYPE_MAPPER = {
     "dcim.modulebaytemplate": None,
     "dcim.moduletype": None,
     "dcim.platform": None,
-    "dcim.powerfeed": None,
+    "dcim.powerfeed": PowerFeeds,
     "dcim.poweroutlet": PowerOutlets,
     "dcim.poweroutlettemplate": None,
     "dcim.powerpanel": None,
@@ -71,7 +83,6 @@ CONTENT_TYPE_MAPPER = {
     "extras.imageattachment": None,
     "extras.jobresult": None,
     "extras.journalentry": None,
-    "extras.objectchange": None,
     "extras.report": None,
     "extras.script": None,
     "extras.tag": None,

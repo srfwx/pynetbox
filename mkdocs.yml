@@ -1,0 +1,71 @@
+site_name: pynetbox
+site_description: Python API client library for NetBox
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_heading: true
+            heading_level: 3
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: installation.md
+    - Quick Start: getting-started.md
+  - API Reference:
+    - Core Classes: api.md
+    - Endpoint: endpoint.md
+    - Response: response.md
+    - Request: request.md
+    - Circuits: circuits.md
+    - DCIM: dcim.md
+    - IPAM: ipam.md
+    - Virtualization: virtualization.md
+  - Advanced Topics:
+    - Advanced Usage: advanced.md
+    - Branching: branching.md
+  - Development:
+    - Development Guide: development/index.md
+    - Getting Started: development/getting-started.md
+    - Release Checklist: development/release-checklist.md
+  - Release Notes: release-notes.md
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - tables
+  - attr_list
+  - md_in_html

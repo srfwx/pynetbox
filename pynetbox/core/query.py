@@ -15,9 +15,75 @@ limitations under the License.
 """
 
 import concurrent.futures as cf
+import io
+import os
 import json
 
 from packaging import version
+
+# NetBox v2 token prefix (introduced in NetBox 4.5.0)
+TOKEN_PREFIX = "nbt_"
+
+
+def _is_v2_token(token):
+    """Detect if a token is NetBox v2 format.
+
+    V2 tokens (introduced in NetBox 4.5.0) have the format: nbt_<id>.<token>
+    The nbt_ prefix is used for secrets detection.
+
+    V1 tokens are simple strings without dots.
+
+    Returns True if token is v2 format, False otherwise.
+    """
+    if not token or not token.startswith(TOKEN_PREFIX):
+        return False
+
+    # Remove nbt_ prefix
+    token_body = token[len(TOKEN_PREFIX) :]
+
+    # V2 tokens contain a dot separating the ID from the secret
+    return "." in token_body
+
+
+def _is_file_like(obj):
+    if isinstance(obj, (str, bytes)):
+        return False
+    # Check if it's a standard library IO object OR has a callable read method
+    return isinstance(obj, io.IOBase) or (
+        hasattr(obj, "read") and callable(getattr(obj, "read"))
+    )
+
+
+def _extract_files(data):
+    """Extract file-like objects from data dict.
+
+    Returns a tuple of (clean_data, files) where clean_data has file objects
+    removed and files is a dict suitable for requests' files parameter.
+    """
+    if not isinstance(data, dict):
+        return data, None
+
+    files = {}
+    clean_data = {}
+
+    for key, value in data.items():
+        if _is_file_like(value):
+            # Format: (filename, file_obj, content_type)
+            # Try to get filename from file object, fallback to key
+            filename = getattr(value, "name", None)
+            if filename:
+                # Extract just the filename, not the full path
+                filename = os.path.basename(filename)
+            else:
+                filename = key
+            files[key] = (filename, value)
+        elif isinstance(value, tuple) and len(value) >= 2 and _is_file_like(value[1]):
+            # Already in (filename, file_obj) or (filename, file_obj, content_type) format
+            files[key] = value
+        else:
+            clean_data[key] = value
+
+    return clean_data, files if files else None
 
 
 def calc_pages(limit, count):
@@ -26,20 +92,21 @@ def calc_pages(limit, count):
 
 
 class RequestError(Exception):
-    """Basic Request Exception
+    """Basic Request Exception.
 
     More detailed exception that returns the original requests object
     for inspection. Along with some attributes with specific details
     from the requests object. If return is json we decode and add it
     to the message.
 
-    :Example:
+    ## Examples
 
-    >>> try:
-    ...   nb.dcim.devices.create(name="destined-for-failure")
-    ... except pynetbox.RequestError as e:
-    ...   print(e.error)
-
+    ```python
+    try:
+        nb.dcim.devices.create(name="destined-for-failure")
+    except pynetbox.RequestError as e:
+        print(e.error)
+    ```
     """
 
     def __init__(self, req):
@@ -70,7 +137,7 @@ class RequestError(Exception):
 
 
 class AllocationError(Exception):
-    """Allocation Exception
+    """Allocation Exception.
 
     Used with available-ips/available-prefixes when there is no
     room for allocation and NetBox returns 409 Conflict.
@@ -88,7 +155,7 @@ class AllocationError(Exception):
 
 
 class ContentError(Exception):
-    """Content Exception
+    """Content Exception.
 
     If the API URL does not point to a valid NetBox API, the server may
     return a valid response code, but the content is not json. This
@@ -108,14 +175,39 @@ class ContentError(Exception):
         return self.error
 
 
+class ParameterValidationError(Exception):
+    """API parameter validation Exception.
+
+    Raised when filter parameters do not match Netbox OpenAPI specification.
+
+    ## Examples
+
+    ```python
+    try:
+        nb.dcim.devices.filter(field_which_does_not_exist="destined-for-failure")
+    except pynetbox.ParameterValidationError as e:
+        print(e.error)
+    ```
+    """
+
+    def __init__(self, errors):
+        super().__init__(errors)
+        self.error = f"The request parameter validation returned an error: {errors}"
+
+    def __str__(self):
+        return self.error
+
+
 class Request:
-    """Creates requests to the Netbox API
+    """Creates requests to the Netbox API.
 
     Responsible for building the url and making the HTTP(S) requests to
-    Netbox's API
+    Netbox's API.
 
-    :param base: (str) Base URL passed in api() instantiation.
-    :param filters: (dict, optional) contains key/value pairs that
+    ## Parameters
+
+    * **base** (str): Base URL passed in api() instantiation.
+    * **filters** (dict, optional): Contains key/value pairs that
         correlate to the filters a given endpoint accepts.
         In (e.g. /api/dcim/devices/?name='test') 'name': 'test'
         would be in the filters dict.
@@ -131,17 +223,28 @@ class Request:
         key=None,
         token=None,
         threading=False,
+        expect_json=True,
     ):
-        """
-        Instantiates a new Request object
+        """Instantiates a new Request object.
 
-        Args:
-            base (string): Base URL passed in api() instantiation.
-            filters (dict, optional): contains key/value pairs that
-                correlate to the filters a given endpoint accepts.
-                In (e.g. /api/dcim/devices/?name='test') 'name': 'test'
-                would be in the filters dict.
-            key (int, optional): database id of the item being queried.
+        ## Parameters
+
+        * **base** (string): Base URL passed in api() instantiation.
+        * **filters** (dict, optional): Contains key/value pairs that
+            correlate to the filters a given endpoint accepts.
+            In (e.g. /api/dcim/devices/?name='test') 'name': 'test'
+            would be in the filters dict.
+        * **key** (int, optional): Database id of the item being queried.
+        * **expect_json** (bool, optional): If True, expects JSON response
+            and sets appropriate Accept header. If False, expects raw content
+            (e.g., SVG, XML) and returns text. Defaults to True.
+
+        ## Note
+
+        The `count` attribute is not initialized here. It is set dynamically
+        by the `get()` method when paginating results, or by `get_count()`
+        when explicitly requesting the count. This allows `get_count()` to
+        use `hasattr()` to determine if a count has already been fetched.
         """
         self.base = self.normalize_url(base)
         self.filters = filters or None
@@ -153,9 +256,10 @@ class Request:
         self.limit = limit
         self.offset = offset
         self.req = None
+        self.expect_json = expect_json
 
     def get_openapi(self):
-        """Gets the OpenAPI Spec"""
+        """Gets the OpenAPI Spec."""
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
@@ -184,13 +288,15 @@ class Request:
         Issues a GET request to the base URL to read the API version from the
         response headers.
 
-        :Raises: RequestError if req.ok returns false.
-        :Returns: Version number as a string. Empty string if version is not
+        ## Returns
+        Version number as a string. Empty string if version is not
         present in the headers.
+
+        ## Raises
+        RequestError if req.ok returns false.
         """
-        headers = {
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
+        self._add_auth_header(headers)
         req = self.http_session.get(
             self.normalize_url(self.base),
             headers=headers,
@@ -203,12 +309,14 @@ class Request:
     def get_status(self):
         """Gets the status from /api/status/ endpoint in NetBox.
 
-        :Returns: Dictionary as returned by NetBox.
-        :Raises: RequestError if request is not successful.
+        ## Returns
+        Dictionary as returned by NetBox.
+
+        ## Raises
+        RequestError if request is not successful.
         """
         headers = {"Content-Type": "application/json"}
-        if self.token:
-            headers["authorization"] = "Token {}".format(self.token)
+        self._add_auth_header(headers)
         req = self.http_session.get(
             "{}status/".format(self.normalize_url(self.base)),
             headers=headers,
@@ -225,14 +333,43 @@ class Request:
 
         return url
 
-    def _make_call(self, verb="get", url_override=None, add_params=None, data=None):
-        if verb in ("post", "put") or verb == "delete" and data:
-            headers = {"Content-Type": "application/json"}
-        else:
-            headers = {"accept": "application/json"}
+    def _add_auth_header(self, headers):
+        """Add authorization header to headers dict if token is present.
 
+        ## Parameters
+        * **headers** (dict): Headers dictionary to update with authorization.
+        """
         if self.token:
-            headers["authorization"] = "Token {}".format(self.token)
+            if _is_v2_token(self.token):
+                headers["authorization"] = "Bearer {}".format(self.token)
+            else:
+                headers["authorization"] = "Token {}".format(self.token)
+
+    def _make_call(self, verb="get", url_override=None, add_params=None, data=None):
+        # Extract any file-like objects from data
+        files = None
+        # Verbs that support request bodies with file uploads
+        body_verbs = ("post", "put", "patch")
+
+        # Set Accept header based on expected response type
+        if self.expect_json:
+            headers = {"accept": "application/json"}
+        else:
+            headers = {"accept": "*/*"}
+
+        # Extract files from data for applicable verbs
+        if data is not None and verb in body_verbs:
+            data, files = _extract_files(data)
+
+        # Set headers based on request type
+        should_be_json_body = not files and (
+            verb in body_verbs or (verb == "delete" and data)
+        )
+
+        if should_be_json_body:
+            headers["Content-Type"] = "application/json"
+
+        self._add_auth_header(headers)
 
         params = {}
         if not url_override:
@@ -241,10 +378,19 @@ class Request:
             if add_params:
                 params.update(add_params)
 
-        req = getattr(self.http_session, verb)(
-            url_override or self.url, headers=headers, params=params, json=data
-        )
-        self.req = req
+        if files:
+            # Use multipart/form-data for file uploads
+            req = getattr(self.http_session, verb)(
+                url_override or self.url,
+                headers=headers,
+                params=params,
+                data=data,
+                files=files,
+            )
+        else:
+            req = getattr(self.http_session, verb)(
+                url_override or self.url, headers=headers, params=params, json=data
+            )
 
         if req.status_code == 409 and verb == "post":
             raise AllocationError(req)
@@ -254,10 +400,15 @@ class Request:
             else:
                 raise RequestError(req)
         elif req.ok:
-            try:
-                return req.json()
-            except json.JSONDecodeError:
-                raise ContentError(req)
+            # Parse response based on expected type
+            if self.expect_json:
+                try:
+                    return req.json()
+                except json.JSONDecodeError:
+                    raise ContentError(req)
+            else:
+                # Return raw text for non-JSON responses
+                return req.text
         else:
             raise RequestError(req)
 
@@ -280,11 +431,12 @@ class Request:
         Makes a GET request to NetBox's API, and automatically recurses
         any paginated results.
 
-        :raises: RequestError if req.ok returns false.
-        :raises: ContentError if response is not json.
+        ## Returns
+        List of `Response` objects returned from the endpoint.
 
-        :Returns: List of `Response` objects returned from the
-            endpoint.
+        ## Raises
+        * RequestError if req.ok returns false.
+        * ContentError if response is not json.
         """
 
         if not add_params and self.limit is not None:
@@ -347,11 +499,16 @@ class Request:
 
         Makes a PUT request to NetBox's API.
 
-        :param data: (dict) Contains a dict that will be turned into a
+        ## Parameters
+        * **data** (dict): Contains a dict that will be turned into a
             json object and sent to the API.
-        :raises: RequestError if req.ok returns false.
-        :raises: ContentError if response is not json.
-        :returns: Dict containing the response from NetBox's API.
+
+        ## Returns
+        Dict containing the response from NetBox's API.
+
+        ## Raises
+        * RequestError if req.ok returns false.
+        * ContentError if response is not json.
         """
         return self._make_call(verb="put", data=data)
 
@@ -360,14 +517,19 @@ class Request:
 
         Makes a POST request to NetBox's API.
 
-        :param data: (dict) Contains a dict that will be turned into a
+        ## Parameters
+        * **data** (dict): Contains a dict that will be turned into a
             json object and sent to the API.
-        :raises: RequestError if req.ok returns false.
-        :raises: AllocationError if req.status_code is 409 (Conflict)
+
+        ## Returns
+        Dict containing the response from NetBox's API.
+
+        ## Raises
+        * RequestError if req.ok returns false.
+        * AllocationError if req.status_code is 409 (Conflict)
             as with available-ips and available-prefixes when there is
             no room for the requested allocation.
-        :raises: ContentError if response is not json.
-        :Returns: Dict containing the response from NetBox's API.
+        * ContentError if response is not json.
         """
         return self._make_call(verb="post", data=data)
 
@@ -376,13 +538,15 @@ class Request:
 
         Makes a DELETE request to NetBox's API.
 
-        :param data: (list) Contains a dict that will be turned into a
+        ## Parameters
+        * **data** (list): Contains a dict that will be turned into a
             json object and sent to the API.
-        Returns:
-            True if successful.
 
-        Raises:
-            RequestError if req.ok doesn't return True.
+        ## Returns
+        True if successful.
+
+        ## Raises
+        RequestError if req.ok doesn't return True.
         """
         return self._make_call(verb="delete", data=data)
 
@@ -391,11 +555,16 @@ class Request:
 
         Makes a PATCH request to NetBox's API.
 
-        :param data: (dict) Contains a dict that will be turned into a
+        ## Parameters
+        * **data** (dict): Contains a dict that will be turned into a
             json object and sent to the API.
-        :raises: RequestError if req.ok returns false.
-        :raises: ContentError if response is not json.
-        :returns: Dict containing the response from NetBox's API.
+
+        ## Returns
+        Dict containing the response from NetBox's API.
+
+        ## Raises
+        * RequestError if req.ok returns false.
+        * ContentError if response is not json.
         """
         return self._make_call(verb="patch", data=data)
 
@@ -404,23 +573,27 @@ class Request:
 
         Makes an OPTIONS request to NetBox's API.
 
-        :raises: RequestError if req.ok returns false.
-        :raises: ContentError if response is not json.
+        ## Returns
+        Dict containing the response from NetBox's API.
 
-        :returns: Dict containing the response from NetBox's API.
+        ## Raises
+        * RequestError if req.ok returns false.
+        * ContentError if response is not json.
         """
         return self._make_call(verb="options")
 
     def get_count(self, *args, **kwargs):
-        """Returns object count for query
+        """Returns object count for query.
 
         Makes a query to the endpoint with ``limit=1`` set and only
         returns the value of the "count" field.
 
-        :raises: RequestError if req.ok returns false.
-        :raises: ContentError if response is not json.
+        ## Returns
+        Int of number of objects query returned.
 
-        :returns: Int of number of objects query returned.
+        ## Raises
+        * RequestError if req.ok returns false.
+        * ContentError if response is not json.
         """
 
         if not hasattr(self, "count"):
