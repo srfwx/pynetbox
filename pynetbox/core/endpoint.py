@@ -14,44 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import weakref
-
 from pynetbox.core.query import Request, RequestError
 from pynetbox.core.query import ParameterValidationError
 from pynetbox.core.response import Record, RecordSet
 
 RESERVED_KWARGS = ()
-
-
-class CachedRecordRegistry:
-    """
-    A cache for Record objects.
-    """
-
-    def __init__(self):
-        self._cache = {}
-        self._hit = 0
-        self._miss = 0
-
-    def get(self, object_type, key):
-        """
-        Retrieves a record from the cache
-        """
-        if not (object_cache := self._cache.get(object_type)):
-            return None
-        if object := object_cache.get(key, None):
-            self._hit += 1
-            return object
-        self._miss += 1
-        return None
-
-    def set(self, object_type, key, value):
-        """
-        Stores a record in the cache
-        """
-        if object_type not in self._cache:
-            self._cache[object_type] = {}
-        self._cache[object_type][key] = value
 
 
 class Endpoint:
@@ -89,10 +56,6 @@ class Endpoint:
             endpoint=self.name,
         )
         self._choices = None
-        self._init_cache()
-
-    def _init_cache(self):
-        self._cache = CachedRecordRegistry()
 
     def _lookup_ret_obj(self, model):
         """Loads unique Response objects.
@@ -116,10 +79,8 @@ class Endpoint:
         return ret
 
     def _build_recordset(self, request):
-        """Builds RecordSet object and ensures cache is discarded."""
-        record_set = RecordSet(self, request)
-        weakref.finalize(record_set, self._init_cache)
-        return record_set
+        """Builds a RecordSet with its own nested-record registry."""
+        return RecordSet(self, request)
 
     def _validate_openapi_parameters(self, method: str, parameters: dict) -> None:
         """Validate GET request parameters against OpenAPI specification

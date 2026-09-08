@@ -589,3 +589,59 @@ class RecordSetTestCase(unittest.TestCase):
                 data=[{"id": i, "status": "offline"} for i in RecordSetTestCase.ids],
             )
             self.assertTrue(test)
+
+    def test_nested_registry_is_scoped_to_recordset(self):
+        endpoint = Endpoint(Mock(base_url="http://localhost:8000/api"), Mock(), "test")
+
+        class FakeRequest:
+            def __init__(self, name):
+                self.name = name
+
+            def get(self):
+                self.count = 3
+                yield from (
+                    {
+                        "id": i,
+                        "site": {
+                            "id": 7,
+                            "url": "http://localhost:8000/api/dcim/sites/7/",
+                            "name": self.name,
+                        },
+                    }
+                    for i in range(3)
+                )
+
+        for first_name, second_name in (("Old", "New"), ("New", "Old")):
+            with self.subTest(first_name=first_name):
+                first_set = endpoint._build_recordset(FakeRequest(first_name))
+                second_set = endpoint._build_recordset(FakeRequest(second_name))
+                # Exercise the prefetched response path as well as normal iteration.
+                self.assertEqual(len(first_set), 3)
+                first = next(first_set)
+                second = next(second_set)
+                self.assertEqual(first.site.name, first_name)
+                self.assertEqual(second.site.name, second_name)
+                self.assertIsNot(first.site, second.site)
+                self.assertIs(next(first_set).site, first.site)
+                self.assertIs(next(second_set).site, second.site)
+                self.assertEqual(dict(second)["site"]["name"], second_name)
+                # Destroying a different recordset must not reset this one's registry.
+                del first_set
+                self.assertIs(next(second_set).site, second.site)
+
+    def test_direct_records_do_not_share_nested_registry(self):
+        endpoint = Endpoint(Mock(base_url="http://localhost:8000/api"), Mock(), "test")
+        values = {
+            "id": 1,
+            "site": {
+                "id": 7,
+                "url": "http://localhost:8000/api/dcim/sites/7/",
+                "name": "Old",
+            },
+        }
+        old = Record(values, endpoint.api, endpoint)
+        values["site"]["name"] = "New"
+        fresh = Record(values, endpoint.api, endpoint)
+        self.assertEqual(old.site.name, "Old")
+        self.assertEqual(fresh.site.name, "New")
+        self.assertIsNot(old.site, fresh.site)

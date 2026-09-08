@@ -47,6 +47,37 @@ class JsonField:
     _json_field = True
 
 
+class CachedRecordRegistry:
+    """
+    A cache for Record objects.
+    """
+
+    def __init__(self):
+        self._cache = {}
+        self._hit = 0
+        self._miss = 0
+
+    def get(self, object_type, key):
+        """
+        Retrieves a record from the cache
+        """
+        if not (object_cache := self._cache.get(object_type)):
+            return None
+        if object := object_cache.get(key, None):
+            self._hit += 1
+            return object
+        self._miss += 1
+        return None
+
+    def set(self, object_type, key, value):
+        """
+        Stores a record in the cache
+        """
+        if object_type not in self._cache:
+            self._cache[object_type] = {}
+        self._cache[object_type][key] = value
+
+
 class RecordSet:
     """Iterator containing Record objects.
 
@@ -82,6 +113,7 @@ class RecordSet:
         self.request = request
         self.response = self.request.get()
         self._response_cache = []
+        self._record_registry = CachedRecordRegistry()
 
     def __iter__(self):
         return self
@@ -92,11 +124,13 @@ class RecordSet:
                 self._response_cache.pop(),
                 self.endpoint.api,
                 self.endpoint,
+                record_registry=self._record_registry,
             )
         return self.endpoint.return_obj(
             next(self.response),
             self.endpoint.api,
             self.endpoint,
+            record_registry=self._record_registry,
         )
 
     def __len__(self):
@@ -326,13 +360,16 @@ class Record(BaseRecord):
         ]
     )
 
-    def __init__(self, values, api, endpoint):
+    def __init__(self, values, api, endpoint, *, record_registry=None):
         self.has_details = False
         super().__init__()
         self.api = api
         self.default_ret = Record
         self.url = values.get("url", None) if values else None
         self._endpoint = endpoint
+        self._record_registry = (
+            record_registry if record_registry is not None else CachedRecordRegistry()
+        )
         if values:
             self._parse_values(values)
 
@@ -405,16 +442,11 @@ class Record(BaseRecord):
             return getattr(getattr(self.api, app), name)
 
     def _get_or_init(self, object_type, key, value, model):
-        """
-        Returns a record from the endpoint cache if it exists, otherwise
-        initializes a new record, store it in the cache, and return it.
-        """
-        if self._endpoint:
-            if cached := self._endpoint._cache.get(object_type, key):
-                return cached
-        record = model(value, self.api, None)
-        if self._endpoint:
-            self._endpoint._cache.set(object_type, key, record)
+        """Reuse nested records only within this parsing context."""
+        if cached := self._record_registry.get(object_type, key):
+            return cached
+        record = model(value, self.api, None, record_registry=self._record_registry)
+        self._record_registry.set(object_type, key, record)
         return record
 
     def _extract_app_endpoint(self, url):
