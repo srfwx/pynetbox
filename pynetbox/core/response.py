@@ -565,17 +565,20 @@ class Record(BaseRecord):
 
             return value, [*value]
 
-        def parse_value(key_name, value):
-            if isinstance(value, dict):
+        # Scalars already have their initial value; only containers need parsing.
+        init_cache = list(values.items())
+        for index, (key_name, value) in enumerate(init_cache):
+            if value is None:
+                pass
+            elif isinstance(value, dict):
                 value, to_cache = dict_parser(key_name, value)
+                init_cache[index] = (key_name, to_cache)
             elif isinstance(value, list):
                 value, to_cache = list_parser(key_name, value)
-            else:
-                to_cache = value
+                init_cache[index] = (key_name, to_cache)
             setattr(self, key_name, value)
-            return to_cache
 
-        self._init_cache = [(k, parse_value(k, v)) for k, v in values.items()]
+        self._init_cache = init_cache
 
     def full_details(self):
         """Queries the hyperlinked endpoint if 'url' is defined.
